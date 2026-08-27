@@ -7,3 +7,4 @@ button:hover { background: #35648f; }
 button:disabled { cursor: wait; opacity: .65; }
 .status { min-height: 18px; color: #9ac8ff; font-size: 12px; }
 .note { margin: 12px 0 0; color: #858997; font-size: 11px; }
+.note a { color: #9ac8ff; }

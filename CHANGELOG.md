@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.3 - 2026-08-27
+
+- Pointed metadata-creation guidance to the maintained ComfyUI Video Saver fork.
+- Added a companion saver link to the extension popup.
+
 ## 0.5.2 - 2026-08-27
 
 - Added sequential multi-video queues with automatic and manual processing.
