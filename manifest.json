@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "Civitai Video Metadata Assistant",
+  "version": "0.5.2",
+  "description": "Read generation metadata from local MP4/WebM files and fill Civitai upload prompts and resources.",
+  "action": {
+    "default_title": "Scan Civitai video metadata",
+    "default_popup": "popup.html"
+  },
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://civitai.com/*",
+    "https://*.civitai.com/*",
+    "https://civitai.red/*",
+    "https://*.civitai.red/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://civitai.com/*",
+        "https://*.civitai.com/*",
+        "https://civitai.red/*",
+        "https://*.civitai.red/*"
+      ],
+      "js": ["src/metadata.js", "src/content.js"],
+      "css": ["src/content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "civitai-video-metadata-assistant@example.invalid",
+      "strict_min_version": "109.0"
+    }
+  }
+}

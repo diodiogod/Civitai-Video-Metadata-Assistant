@@ -1,0 +1,15 @@
+{
+  "name": "civitai-video-metadata-assistant",
+  "version": "0.5.2",
+  "private": true,
+  "type": "commonjs",
+  "description": "Firefox/Chrome WebExtension for importing local AI video metadata into Civitai uploads.",
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check src/metadata.js && node --check src/content.js && node --check popup.js",
+    "package": "node scripts/package.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
