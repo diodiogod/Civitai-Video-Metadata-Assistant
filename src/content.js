@@ -823,9 +823,28 @@
       ? [...document.querySelectorAll('label')].find((label) => label.htmlFor === element.id)
       : null;
     const wrapping = element.closest('label');
+    const labelledBy = String(element.getAttribute('aria-labelledby') || '')
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((id) => document.getElementById(id)?.textContent)
+      .filter(Boolean)
+      .join(' ');
+    let nearby = '';
+    let container = element.parentElement;
+    for (let depth = 0; container && container !== document.body && depth < 5; depth += 1, container = container.parentElement) {
+      const controls = container.querySelectorAll('textarea, input:not([type="file"]), [contenteditable="true"], [role="combobox"]');
+      if (controls.length !== 1) continue;
+      const label = container.querySelector('label, legend, [data-label]');
+      if (label && label !== element && !label.contains(element)) {
+        nearby = normalizeText(label.textContent);
+        if (nearby) break;
+      }
+    }
     return normalizeText([
       explicit?.textContent,
       wrapping?.textContent,
+      labelledBy,
+      nearby,
       element.getAttribute('aria-label'),
       element.getAttribute('placeholder'),
       element.getAttribute('name'),
@@ -880,13 +899,21 @@
   }
 
   function promptEditorRoot(editor) {
-    const modal = editor.closest('[role="dialog"], [data-radix-dialog-content], [data-overlay-container], form');
-    if (modal) return modal;
+    // Prefer the complete dialog. Civitai nests smaller overlay containers
+    // inside it, and choosing the nearest generic overlay hides all fields
+    // except the positive prompt from the extension.
+    const dialog = editor.closest('[role="dialog"]');
+    if (dialog) return dialog;
+    const radixDialog = editor.closest('[data-radix-dialog-content]');
+    if (radixDialog) return radixDialog;
     let root = editor.parentElement;
-    for (let depth = 0; root && root !== document.body && depth < 5; depth += 1, root = root.parentElement) {
-      if (/prompt/i.test(normalizeText(root.textContent)) && root.querySelector('button, [role="button"]')) return root;
+    for (let depth = 0; root && root !== document.body && depth < 12; depth += 1, root = root.parentElement) {
+      const controls = root.querySelectorAll('textarea, input:not([type="file"]), [contenteditable="true"], [role="combobox"]');
+      const hasSave = visibleElements('button, [role="button"]', root)
+        .some((button) => /^(save|done|confirm|update)(\s+prompt)?$/i.test(normalizeText(button.textContent)));
+      if (controls.length >= 2 && hasSave) return root;
     }
-    return null;
+    return editor.closest('form, [data-overlay-container]') || null;
   }
 
   function findPromptSaveButton(root) {
@@ -938,30 +965,35 @@
       render();
       return;
     }
-    const root = promptEditorRoot(editor);
+    const root = promptEditorRoot(editor) || getDialogRoot();
     dispatchInput(editor, prompt.positive);
     const negativeEditor = findPromptEditor(root || document, true);
-    if (negativeEditor && negativeEditor !== editor && prompt.negative) dispatchInput(negativeEditor, prompt.negative);
+    const filledFields = ['positive prompt'];
+    if (negativeEditor && negativeEditor !== editor && prompt.negative) {
+      dispatchInput(negativeEditor, prompt.negative);
+      filledFields.push('negative prompt');
+    }
     const generation = globalThis.CVMMetadata.getGenerationFields(state.parsed?.metadata || {});
-    const fillLabeledField = (label, value) => {
-      if (value === null || value === undefined || value === '') return;
+    const fillLabeledField = (name, label, value) => {
+      if (value === null || value === undefined || value === '') return false;
       const field = visibleElements('textarea, input:not([type="file"]), [contenteditable="true"]', root || document)
-        .find((element) => label.test(elementLabel(element)));
-      if (field && field !== editor && field !== negativeEditor) dispatchInput(field, String(value));
+        .find((element) => label.test(elementLabel(element).toLowerCase()));
+      if (!field || field === editor || field === negativeEditor) return false;
+      dispatchInput(field, String(value));
+      filledFields.push(name);
+      return true;
     };
-    fillLabeledField(/^guidance scale$/i, generation.guidanceScale);
-    fillLabeledField(/^steps$/i, generation.steps);
-    fillLabeledField(/^sampler$/i, generation.sampler);
-    fillLabeledField(/^(scheduler|schedule type)$/i, generation.scheduler);
-    fillLabeledField(/^seed$/i, generation.seed);
+    fillLabeledField('guidance scale', /^guidance scale$/i, generation.guidanceScale);
+    fillLabeledField('steps', /^steps$/i, generation.steps);
+    fillLabeledField('sampler', /^sampler$/i, generation.sampler);
+    fillLabeledField('scheduler', /^(scheduler|schedule type)$/i, generation.scheduler);
+    fillLabeledField('seed', /^seed$/i, generation.seed);
     const saveButton = await waitForDomCondition(() => findPromptSaveButton(root), 3000);
     if (saveButton) {
       saveButton.click();
       await waitForDomCondition(() => !visible(editor) || !visible(saveButton), 8000);
-      state.message = prompt.negative && negativeEditor
-        ? 'Positive and negative prompts were added to Civitai. Review them before submitting.'
-        : 'The positive prompt was added to Civitai. Review it before submitting.';
-      addActivity('success', 'Prompt and available generation settings were filled.');
+      state.message = `Filled ${filledFields.join(', ')}. Review the values before submitting.`;
+      addActivity('success', `Filled ${filledFields.join(', ')}.`);
     } else {
       state.message = 'The prompt was inserted. Civitai’s confirmation button was not recognized, so review the editor and save it manually.';
     }

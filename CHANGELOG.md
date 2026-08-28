@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.1 - 2026-08-28
+
+- Fixed Civitai's nested prompt-dialog detection so negative prompt and generation fields are filled alongside the positive prompt.
+- Recognize labels supplied by `aria-labelledby` and single-control field wrappers.
+
 ## 0.6.0 - 2026-08-28
 
 - Added a persistent collapse/expand control to the on-page upload assistant for smaller screens.
