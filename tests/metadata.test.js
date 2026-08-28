@@ -187,3 +187,29 @@ test('falls back to the resolved Civitai model name when no hash exists', () => 
   });
   assert.deepEqual(search, { query: 'Civitai model name', method: 'name fallback' });
 });
+
+test('builds a unique hash-to-name fallback sequence for picker searches', () => {
+  const searches = metadata.getResourceSearchQueries({
+    hash: '646BA7972C98B06AE5211265C02FA89219809D024FD232AF41C655E8B882677C',
+    name: 'local-resource.safetensors',
+    modelName: 'Metadata model title',
+    lookup: { model: { name: 'Resolved Civitai title' } }
+  });
+  assert.deepEqual(searches, [
+    { query: '646BA7972C', method: 'AutoV2 derived from embedded SHA-256' },
+    { query: 'Resolved Civitai title', method: 'resolved Civitai model name' },
+    { query: 'Metadata model title', method: 'metadata model name' },
+    { query: 'local-resource.safetensors', method: 'metadata resource name' }
+  ]);
+});
+
+test('does not repeat the same name in picker fallback searches', () => {
+  const searches = metadata.getResourceSearchQueries({
+    name: 'Same model',
+    modelName: 'same MODEL',
+    lookup: { model: { name: 'Same Model' } }
+  });
+  assert.deepEqual(searches, [
+    { query: 'Same Model', method: 'name fallback' }
+  ]);
+});

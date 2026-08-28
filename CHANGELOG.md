@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.7 - 2026-08-28
+
+- Retry resource searches by resolved and embedded model names when AutoV2 returns an explicit no-results state.
+- Ignore the resource picker's initial empty state until the entered query has produced a DOM transition.
+
 ## 0.6.6 - 2026-08-28
 
 - Search Civitai's resource picker with 10-character AutoV2 hashes.

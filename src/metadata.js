@@ -573,6 +573,24 @@
     return { query: name, method: 'name fallback' };
   }
 
+  function getResourceSearchQueries(resource) {
+    const primary = getResourceSearchQuery(resource);
+    const candidates = [
+      primary,
+      { query: resource?.lookup?.model?.name, method: 'resolved Civitai model name' },
+      { query: resource?.modelName, method: 'metadata model name' },
+      { query: resource?.name, method: 'metadata resource name' }
+    ];
+    const seen = new Set();
+    return candidates.filter(({ query }) => {
+      if (typeof query !== 'string' || !query.trim()) return false;
+      const key = query.trim().toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).map(({ query, method }) => ({ query: query.trim(), method }));
+  }
+
   return {
     parseVideoBytes,
     parseVideoFile,
@@ -581,6 +599,7 @@
     getPromptFields,
     getGenerationFields,
     getResourceSearchQuery,
+    getResourceSearchQueries,
     detectContainer,
     constants: { MAX_FILE_BYTES, MAX_METADATA_BYTES, MAX_VALUE_BYTES, MAX_ELEMENTS }
   };

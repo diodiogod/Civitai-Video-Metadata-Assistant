@@ -328,6 +328,10 @@
     return globalThis.CVMMetadata.getResourceSearchQuery(resource);
   }
 
+  function resourceSearches(resource) {
+    return globalThis.CVMMetadata.getResourceSearchQueries(resource);
+  }
+
   function resourceRows() {
     if (!state.resources.length) return '<div class="cvm-empty">No Civitai resources were found in this video.</div>';
     return state.resources.map((resource) => {
@@ -650,6 +654,65 @@
     return /no results|no models found|nothing found|no resources found/i.test(text);
   }
 
+  function fieldText(field) {
+    return normalizeText(field?.isContentEditable ? field.textContent : field?.value);
+  }
+
+  function searchPickerOnce(picker, resource, search, watchdogMs = 30000) {
+    return new Promise((resolve) => {
+      let settled = false;
+      let armed = false;
+      const initialNoResults = pickerHasNoResults(picker.root);
+      let sawNoResultsClear = !initialNoResults;
+      const observer = new MutationObserver(check);
+      const watchdog = window.setTimeout(() => finish({ type: 'pending' }), watchdogMs);
+
+      function finish(value) {
+        if (settled) return;
+        settled = true;
+        observer.disconnect();
+        window.clearTimeout(watchdog);
+        resolve(value);
+      }
+
+      function check(mutations = []) {
+        if (settled || !armed || fieldText(picker.input) !== normalizeText(search.query)) return;
+        const root = getDialogRoot();
+        if (!root || !root.isConnected || !visible(root)) return finish({ type: 'closed' });
+        const exactButton = exactResourceSelectButton(root, resource);
+        if (exactButton) return finish({ type: 'match', exactButton });
+        if (initialNoResults && !sawNoResultsClear) {
+          sawNoResultsClear = mutations.some((mutation) => [...mutation.removedNodes]
+            .some((node) => /no results|no models found|nothing found|no resources found/i.test(normalizeText(node.textContent))));
+        }
+        const noResults = pickerHasNoResults(root);
+        if (!noResults) sawNoResultsClear = true;
+        // An initial empty picker can already say "no results" before a query is entered.
+        // Only accept that state after this query has produced a DOM transition.
+        if (noResults && sawNoResultsClear) finish({ type: 'empty' });
+      }
+
+      observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, characterData: true });
+      dispatchInput(picker.input, search.query);
+      armed = fieldText(picker.input) === normalizeText(search.query);
+    });
+  }
+
+  async function searchPickerWithFallbacks(picker, resource) {
+    const searches = resourceSearches(resource);
+    for (let index = 0; index < searches.length; index += 1) {
+      const search = searches[index];
+      state.message = index
+        ? `No result from the previous search. Trying ${search.method}…`
+        : `Searching by ${search.method} for ${resourceName(resource)}…`;
+      render();
+      const result = await searchPickerOnce(picker, resource, search);
+      if (result.type !== 'empty') return { search, result };
+      addActivity('warning', `No result for ${resourceName(resource)} using ${search.method}.`);
+    }
+    return { search: searches[searches.length - 1], result: { type: 'empty' } };
+  }
+
   async function addResourceViaPicker(resource) {
     const name = resourceName(resource);
     const lookup = resource.lookup;
@@ -792,15 +855,27 @@
       return input ? { root, input } : null;
     });
     if (picker) {
-      const search = resourceSearch(resource);
-      dispatchInput(picker.input, search.query || resourceName(resource));
+      const { search, result } = await searchPickerWithFallbacks(picker, resource);
+      if (result.type === 'closed') {
+        state.skipped.add(resourceId(resource));
+        state.message = `${resourceName(resource)} was skipped.`;
+        state.busy = false;
+        render();
+        return;
+      }
+      if (result.type === 'empty') {
+        state.resourceAutomationActive = false;
+        state.message = `No Civitai result was found for ${resourceName(resource)} by hash or name. Close the picker to skip it.`;
+      }
       state.guidedResourceId = resourceId(resource);
       state.guidedSelectionPending = false;
-      state.message = autoSelect
-        ? `Searching by ${search.method} for the exact Civitai version of ${resourceName(resource)}…`
-        : state.autoAdvanceResources
-        ? `Searching by ${search.method}. Select ${resourceName(resource)}; the next search will open automatically.`
-        : `Searching by ${search.method}. Select ${resourceName(resource)}, then use Find next resource.`;
+      if (result.type !== 'empty') {
+        state.message = autoSelect
+          ? `Found ${resourceName(resource)} by ${search.method}; selecting its exact version…`
+          : state.autoAdvanceResources
+          ? `Found by ${search.method}. Select ${resourceName(resource)}; the next search will open automatically.`
+          : `Found by ${search.method}. Select ${resourceName(resource)}, then use Find next resource.`;
+      }
       watchGuidedPicker(picker.root, resource, autoSelect);
     } else {
       state.message = 'The resource picker did not expose its search field.';
