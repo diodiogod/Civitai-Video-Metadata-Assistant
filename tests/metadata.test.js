@@ -137,3 +137,31 @@ test('extracts scheduler from A1111 Schedule type', () => {
   });
   assert.equal(fields.scheduler, 'beta');
 });
+
+test('prefers an embedded resource hash for Civitai picker searches', () => {
+  const search = metadata.getResourceSearchQuery({
+    hash: '08CFE94603',
+    name: 'ambiguous local filename',
+    lookup: { model: { name: 'Different Civitai title' } }
+  });
+  assert.deepEqual(search, { query: '08CFE94603', method: 'embedded hash' });
+});
+
+test('uses a resolved Civitai file hash before falling back to a name', () => {
+  const search = metadata.getResourceSearchQuery({
+    name: 'local name',
+    lookup: {
+      model: { name: 'Civitai model name' },
+      files: [{ hashes: { SHA256: 'ABCDEF0123456789', AutoV2: 'ABCDEF0123' } }]
+    }
+  });
+  assert.deepEqual(search, { query: 'ABCDEF0123456789', method: 'Civitai SHA256 hash' });
+});
+
+test('falls back to the resolved Civitai model name when no hash exists', () => {
+  const search = metadata.getResourceSearchQuery({
+    name: 'local name',
+    lookup: { model: { name: 'Civitai model name' } }
+  });
+  assert.deepEqual(search, { query: 'Civitai model name', method: 'name fallback' });
+});

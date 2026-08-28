@@ -324,6 +324,10 @@
     return resource.hash ? `https://civitai.com/api/v1/model-versions/by-hash/${encodeURIComponent(resource.hash)}` : '';
   }
 
+  function resourceSearch(resource) {
+    return globalThis.CVMMetadata.getResourceSearchQuery(resource);
+  }
+
   function resourceRows() {
     if (!state.resources.length) return '<div class="cvm-empty">No Civitai resources were found in this video.</div>';
     return state.resources.map((resource) => {
@@ -662,7 +666,8 @@
     });
     if (!picker) return { ok: false, reason: 'The resource picker did not expose its search field.' };
     const input = picker.input;
-    dispatchInput(input, modelName);
+    const search = resourceSearch(resource);
+    dispatchInput(input, search.query || modelName);
     const nameParts = [modelName, version].filter(Boolean).map((part) => normalizeText(part).toLowerCase());
     const searchResult = await waitForDomCondition(() => {
       const root = getDialogRoot();
@@ -787,14 +792,15 @@
       return input ? { root, input } : null;
     });
     if (picker) {
-      dispatchInput(picker.input, resource.lookup?.model?.name || resource.modelName || resource.name || resourceName(resource));
+      const search = resourceSearch(resource);
+      dispatchInput(picker.input, search.query || resourceName(resource));
       state.guidedResourceId = resourceId(resource);
       state.guidedSelectionPending = false;
       state.message = autoSelect
-        ? `Looking for the exact Civitai version of ${resourceName(resource)}…`
+        ? `Searching by ${search.method} for the exact Civitai version of ${resourceName(resource)}…`
         : state.autoAdvanceResources
-        ? `Select the correct result for ${resourceName(resource)}. The next search will open automatically.`
-        : `Select the correct result for ${resourceName(resource)}, then use Find next resource.`;
+        ? `Searching by ${search.method}. Select ${resourceName(resource)}; the next search will open automatically.`
+        : `Searching by ${search.method}. Select ${resourceName(resource)}, then use Find next resource.`;
       watchGuidedPicker(picker.root, resource, autoSelect);
     } else {
       state.message = 'The resource picker did not expose its search field.';

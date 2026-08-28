@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.5 - 2026-08-28
+
+- Search Civitai's resource picker by embedded model hash instead of ambiguous resource names.
+- Fall back to hashes from Civitai's version API, then to the model name only when no hash is available.
+
 ## 0.6.4 - 2026-08-28
 
 - Commit and blur Civitai's controlled Seed input before the extension programmatically saves the prompt form.

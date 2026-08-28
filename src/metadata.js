@@ -535,6 +535,28 @@
     };
   }
 
+  function getResourceSearchQuery(resource) {
+    const clean = (value) => typeof value === 'string' ? value.trim() : '';
+    const embeddedHash = clean(resource?.hash || resource?.modelHash);
+    if (embeddedHash) return { query: embeddedHash, method: 'embedded hash' };
+
+    const files = Array.isArray(resource?.lookup?.files) ? resource.lookup.files : [];
+    for (const hashName of ['SHA256', 'AutoV2', 'CRC32']) {
+      const fileHash = files
+        .map((file) => clean(file?.hashes?.[hashName]))
+        .find(Boolean);
+      if (fileHash) return { query: fileHash, method: `Civitai ${hashName} hash` };
+    }
+
+    const name = clean(
+      resource?.lookup?.model?.name
+      || resource?.modelName
+      || resource?.name
+      || resource?.lookup?.name
+    );
+    return { query: name, method: 'name fallback' };
+  }
+
   return {
     parseVideoBytes,
     parseVideoFile,
@@ -542,6 +564,7 @@
     extractResources,
     getPromptFields,
     getGenerationFields,
+    getResourceSearchQuery,
     detectContainer,
     constants: { MAX_FILE_BYTES, MAX_METADATA_BYTES, MAX_VALUE_BYTES, MAX_ELEMENTS }
   };
