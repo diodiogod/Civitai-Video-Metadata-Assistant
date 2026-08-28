@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.3 - 2026-08-28
+
+- Fill Civitai's specially controlled Seed input through native text insertion and verify that React retained the complete value.
+
 ## 0.6.2 - 2026-08-28
 
 - Wait for Civitai's complete prompt form instead of racing its delayed secondary-field render.

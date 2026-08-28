@@ -958,6 +958,33 @@
     return true;
   }
 
+  async function fillPromptSeed(root, value) {
+    if (value === null || value === undefined || value === '') return false;
+    const field = promptField(root, 'seed', /^seed$/i);
+    if (!(field instanceof HTMLInputElement)) return false;
+    const text = String(value);
+    field.focus();
+    field.select();
+    const inserted = document.execCommand?.('insertText', false, text) || false;
+    if (!inserted) {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(field, '');
+      for (let index = 0; index < text.length; index += 1) {
+        const partial = text.slice(0, index + 1);
+        setter?.call(field, partial);
+        field.dispatchEvent(new InputEvent('input', {
+          bubbles: true,
+          composed: true,
+          inputType: 'insertText',
+          data: text[index]
+        }));
+      }
+      field.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+    }
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    return field.value === text;
+  }
+
   async function fillCivitaiPrompt() {
     if (state.busy) return;
     if (!hasPromptTarget()) {
@@ -1026,7 +1053,7 @@
     fillLabeledField('steps', 'steps', /^steps$/i, generation.steps);
     if (await selectPromptSampler(root, generation.sampler)) filledFields.push('sampler');
     fillLabeledField('scheduler', 'scheduler', /^(scheduler|schedule type)$/i, generation.scheduler);
-    fillLabeledField('seed', 'seed', /^seed$/i, generation.seed);
+    if (await fillPromptSeed(root, generation.seed)) filledFields.push('seed');
     const saveButton = await waitForDomCondition(() => findPromptSaveButton(root), 3000);
     if (saveButton) {
       saveButton.click();
