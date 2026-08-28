@@ -537,15 +537,31 @@
 
   function getResourceSearchQuery(resource) {
     const clean = (value) => typeof value === 'string' ? value.trim() : '';
+    const isHexHash = (value, length) => new RegExp(`^[a-f0-9]{${length}}$`, 'i').test(value);
+    const toPickerHash = (value) => isHexHash(value, 64) ? value.slice(0, 10) : value;
     const embeddedHash = clean(resource?.hash || resource?.modelHash);
-    if (embeddedHash) return { query: embeddedHash, method: 'embedded hash' };
+    if (embeddedHash) {
+      const query = toPickerHash(embeddedHash);
+      const method = isHexHash(embeddedHash, 64)
+        ? 'AutoV2 derived from embedded SHA-256'
+        : isHexHash(embeddedHash, 10)
+          ? 'embedded AutoV2 hash'
+          : 'embedded hash';
+      return { query, method };
+    }
 
     const files = Array.isArray(resource?.lookup?.files) ? resource.lookup.files : [];
-    for (const hashName of ['SHA256', 'AutoV2', 'CRC32']) {
+    for (const hashName of ['AutoV2', 'SHA256', 'CRC32']) {
       const fileHash = files
         .map((file) => clean(file?.hashes?.[hashName]))
         .find(Boolean);
-      if (fileHash) return { query: fileHash, method: `Civitai ${hashName} hash` };
+      if (fileHash) {
+        const query = toPickerHash(fileHash);
+        const method = hashName === 'SHA256' && query !== fileHash
+          ? 'AutoV2 derived from Civitai SHA-256'
+          : `Civitai ${hashName} hash`;
+        return { query, method };
+      }
     }
 
     const name = clean(

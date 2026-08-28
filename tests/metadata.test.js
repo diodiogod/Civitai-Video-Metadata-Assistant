@@ -138,16 +138,26 @@ test('extracts scheduler from A1111 Schedule type', () => {
   assert.equal(fields.scheduler, 'beta');
 });
 
-test('prefers an embedded resource hash for Civitai picker searches', () => {
+test('prefers an embedded AutoV2 resource hash for Civitai picker searches', () => {
   const search = metadata.getResourceSearchQuery({
     hash: '08CFE94603',
     name: 'ambiguous local filename',
     lookup: { model: { name: 'Different Civitai title' } }
   });
-  assert.deepEqual(search, { query: '08CFE94603', method: 'embedded hash' });
+  assert.deepEqual(search, { query: '08CFE94603', method: 'embedded AutoV2 hash' });
 });
 
-test('uses a resolved Civitai file hash before falling back to a name', () => {
+test('derives an AutoV2 picker hash from an embedded SHA-256 hash', () => {
+  const search = metadata.getResourceSearchQuery({
+    hash: '646BA7972C98B06AE5211265C02FA89219809D024FD232AF41C655E8B882677C'
+  });
+  assert.deepEqual(search, {
+    query: '646BA7972C',
+    method: 'AutoV2 derived from embedded SHA-256'
+  });
+});
+
+test('prefers a resolved Civitai AutoV2 hash before falling back to a name', () => {
   const search = metadata.getResourceSearchQuery({
     name: 'local name',
     lookup: {
@@ -155,7 +165,19 @@ test('uses a resolved Civitai file hash before falling back to a name', () => {
       files: [{ hashes: { SHA256: 'ABCDEF0123456789', AutoV2: 'ABCDEF0123' } }]
     }
   });
-  assert.deepEqual(search, { query: 'ABCDEF0123456789', method: 'Civitai SHA256 hash' });
+  assert.deepEqual(search, { query: 'ABCDEF0123', method: 'Civitai AutoV2 hash' });
+});
+
+test('derives AutoV2 when a resolved file only has SHA-256', () => {
+  const search = metadata.getResourceSearchQuery({
+    lookup: {
+      files: [{ hashes: { SHA256: '1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF' } }]
+    }
+  });
+  assert.deepEqual(search, {
+    query: '1234567890',
+    method: 'AutoV2 derived from Civitai SHA-256'
+  });
 });
 
 test('falls back to the resolved Civitai model name when no hash exists', () => {

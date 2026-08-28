@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.6 - 2026-08-28
+
+- Search Civitai's resource picker with 10-character AutoV2 hashes.
+- Derive AutoV2 from embedded full SHA-256 hashes and prefer Civitai's explicit AutoV2 value when available.
+
 ## 0.6.5 - 2026-08-28
 
 - Search Civitai's resource picker by embedded model hash instead of ambiguous resource names.
