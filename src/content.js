@@ -7,6 +7,14 @@
 
   const EXTENSION_ID = 'cvm-assistant-panel';
   const API_ROOT = 'https://civitai.com/api/v1';
+  const COLLAPSE_STORAGE_KEY = 'cvm-assistant-collapsed';
+  const initialCollapsed = (() => {
+    try {
+      return localStorage.getItem(COLLAPSE_STORAGE_KEY) === '1';
+    } catch (_) {
+      return false;
+    }
+  })();
   const state = {
     file: null,
     fileKey: '',
@@ -32,7 +40,8 @@
     targetMediaContainer: null,
     targetMediaFileKey: '',
     uploadToken: 0,
-    scanningFileKey: ''
+    scanningFileKey: '',
+    collapsed: initialCollapsed
   };
 
   const visible = (element) => Boolean(element && element.isConnected && element.getClientRects().length && getComputedStyle(element).visibility !== 'hidden');
@@ -339,18 +348,39 @@
     if (!panel) return;
     const metadata = state.parsed?.metadata || {};
     const prompt = globalThis.CVMMetadata.getPromptFields(metadata);
+    const generation = globalThis.CVMMetadata.getGenerationFields(metadata);
+    const generationSummary = [
+      generation.steps !== null && generation.steps !== undefined && generation.steps !== '' ? `Steps ${generation.steps}` : '',
+      generation.sampler ? `Sampler ${generation.sampler}` : '',
+      generation.scheduler ? `Scheduler ${generation.scheduler}` : '',
+      generation.seed !== null && generation.seed !== undefined && generation.seed !== '' ? `Seed ${generation.seed}` : '',
+      generation.guidanceScale !== null && generation.guidanceScale !== undefined && generation.guidanceScale !== '' ? `CFG ${generation.guidanceScale}` : ''
+    ].filter(Boolean);
     const promptTargetReady = hasPromptTarget();
     const container = state.parsed?.container ? state.parsed.container.toUpperCase() : '';
+    panel.classList.toggle('cvm-collapsed', state.collapsed);
+    if (state.collapsed) {
+      panel.innerHTML = `
+        <div class="cvm-header">
+          <div><strong>Civitai Video Metadata</strong><small>${state.queue.length ? `${state.queue.length} video${state.queue.length === 1 ? '' : 's'} queued` : 'click to reopen'}</small></div>
+          <button type="button" class="cvm-icon" data-cvm-action="toggle-collapse" title="Expand assistant" aria-label="Expand Civitai Video Metadata Assistant" aria-expanded="false">▣</button>
+        </div>`;
+      panel.querySelector('[data-cvm-action]')?.addEventListener('click', () => handleAction('toggle-collapse'));
+      return;
+    }
     panel.innerHTML = `
       <div class="cvm-header">
         <div><strong>Civitai Video Metadata</strong><small>${container ? `${container} · ` : ''}${escapeHtml(state.file?.name || 'no video selected')}</small></div>
-        <button type="button" class="cvm-icon" data-cvm-action="scan" title="Scan the current upload">↻</button>
+        <div class="cvm-header-actions">
+          <button type="button" class="cvm-icon" data-cvm-action="scan" title="Scan the current upload" aria-label="Scan the current upload">↻</button>
+          <button type="button" class="cvm-icon" data-cvm-action="toggle-collapse" title="Collapse assistant" aria-label="Collapse Civitai Video Metadata Assistant" aria-expanded="true">−</button>
+        </div>
       </div>
       <div class="cvm-message">${escapeHtml(state.message)}</div>
       <label class="cvm-master-mode"><input type="checkbox" data-cvm-auto-everything ${state.autoEverything ? 'checked' : ''}> Do everything automatically after I drop a video</label>
       <div class="cvm-step"><b>1</b><span><strong>Choose the video</strong><small>Drop it below. Metadata stays local until you send the file to Civitai.</small></span></div>
       <ul class="cvm-queue">${queueRows()}</ul>
-      ${state.parsed ? `<div class="cvm-summary"><span>${state.resources.length} resource${state.resources.length === 1 ? '' : 's'}</span><span>${prompt.positive ? 'positive prompt' : 'no prompt text'}</span><span>${metadata.workflow ? 'workflow' : 'no workflow'}</span></div>` : ''}
+      ${state.parsed ? `<div class="cvm-summary"><span>${state.resources.length} resource${state.resources.length === 1 ? '' : 's'}</span><span>${prompt.positive ? 'positive prompt' : 'no prompt text'}</span><span>${prompt.negative ? 'negative prompt' : 'no negative prompt'}</span>${generationSummary.map((item) => `<span>${escapeHtml(item)}</span>`).join('')}<span>${metadata.workflow ? 'workflow' : 'no workflow'}</span></div>` : ''}
       ${state.parsed ? '<div class="cvm-step"><b>2</b><span><strong>Review metadata</strong><small>Check the detected prompt, settings, and resources.</small></span></div>' : ''}
       ${prompt.positive ? `<div class="cvm-prompt"><strong>Prompt</strong><div>${escapeHtml(prompt.positive)}</div>${prompt.negative ? `<small>Negative: ${escapeHtml(prompt.negative)}</small>` : ''}</div>` : ''}
       ${state.parsed ? `<ul class="cvm-resources">${resourceRows()}</ul>` : ''}
@@ -922,6 +952,7 @@
     fillLabeledField(/^guidance scale$/i, generation.guidanceScale);
     fillLabeledField(/^steps$/i, generation.steps);
     fillLabeledField(/^sampler$/i, generation.sampler);
+    fillLabeledField(/^(scheduler|schedule type)$/i, generation.scheduler);
     fillLabeledField(/^seed$/i, generation.seed);
     const saveButton = await waitForDomCondition(() => findPromptSaveButton(root), 3000);
     if (saveButton) {
@@ -962,6 +993,15 @@
   }
 
   async function handleAction(action) {
+    if (action === 'toggle-collapse') {
+      state.collapsed = !state.collapsed;
+      try {
+        localStorage.setItem(COLLAPSE_STORAGE_KEY, state.collapsed ? '1' : '0');
+      } catch (_) {
+        // The panel still collapses for this page when storage is unavailable.
+      }
+      return render();
+    }
     if (action === 'scan') return scanFile();
     if (action === 'choose') return getPanel()?.querySelector('#cvm-file-picker')?.click();
     if (action === 'upload') return useFileInCivitaiUpload();

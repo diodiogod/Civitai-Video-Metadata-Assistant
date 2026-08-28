@@ -72,6 +72,8 @@ Disable **Do everything automatically** to use the individual controls:
 
 The **Activity & issues** section records completed steps, skipped resources, unresolved metadata, and recoverable errors. The extension clears its queue when you leave the Civitai create/edit workflow; it never deletes uploaded Civitai media.
 
+Use the **−** button in the panel header to collapse the assistant when it covers the upload UI. The compact header stays available at the bottom-right so you can expand it again; the preference is remembered for future Civitai upload pages.
+
 ## Screenshots
 
 Screenshots and a short workflow demonstration will be added in a future documentation update.
@@ -84,6 +86,8 @@ Screenshots and a short workflow demonstration will be added in a future documen
 | WebM | Matroska `SimpleTag` entries |
 
 Recognized fields include `parameters`, `prompt`, `workflow`, `extraMetadata`, and `civitaiResources`. To create compatible videos in ComfyUI, use the companion [ComfyUI Video Saver](https://github.com/diodiogod/ComfyUI-Video-Saver) fork. It adds video metadata support while retaining the original Image Saver nodes and features.
+
+When present, the assistant fills Civitai's positive prompt, negative prompt, steps, sampler, scheduler/schedule type, seed, and guidance-scale fields. Fields not exposed by the current Civitai editor are left untouched.
 
 ## Privacy and safety
 

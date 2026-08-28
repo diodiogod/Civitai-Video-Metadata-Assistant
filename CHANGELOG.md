@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.0 - 2026-08-28
+
+- Added a persistent collapse/expand control to the on-page upload assistant for smaller screens.
+- Added scheduler extraction and conditional filling alongside prompt, negative prompt, steps, sampler, seed, and guidance scale.
+- Show detected generation settings in the metadata review summary before filling Civitai.
+
 ## 0.5.3 - 2026-08-27
 
 - Pointed metadata-creation guidance to the maintained ComfyUI Video Saver fork.

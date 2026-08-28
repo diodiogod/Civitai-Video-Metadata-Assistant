@@ -501,6 +501,7 @@
     const aliases = {
       steps: new Set(['steps', 'step']),
       sampler: new Set(['sampler', 'samplername']),
+      scheduler: new Set(['scheduler', 'schedulername', 'scheduletype']),
       seed: new Set(['seed', 'noiseseed']),
       guidanceScale: new Set(['cfg', 'cfgscale', 'guidance', 'guidancescale'])
     };
@@ -528,6 +529,7 @@
     return {
       steps: find(aliases.steps) ?? setting('Steps'),
       sampler: find(aliases.sampler) ?? setting('Sampler'),
+      scheduler: find(aliases.scheduler) ?? setting('Schedule type') ?? setting('Scheduler'),
       seed: find(aliases.seed) ?? setting('Seed'),
       guidanceScale: find(aliases.guidanceScale) ?? setting('CFG scale')
     };

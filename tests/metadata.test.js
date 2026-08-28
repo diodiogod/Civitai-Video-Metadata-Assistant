@@ -125,8 +125,15 @@ test('extracts generation fields from a ComfyUI prompt graph', () => {
     prompt: JSON.stringify({
       seed: { inputs: { noise_seed: 12345 }, class_type: 'RandomNoise' },
       sampler: { inputs: { sampler_name: 'euler' }, class_type: 'KSamplerSelect' },
-      schedule: { inputs: { steps: 10, cfg: 4.5 }, class_type: 'BasicScheduler' }
+      schedule: { inputs: { steps: 10, cfg: 4.5, scheduler: 'karras' }, class_type: 'BasicScheduler' }
     })
   });
-  assert.deepEqual(fields, { steps: 10, sampler: 'euler', seed: 12345, guidanceScale: 4.5 });
+  assert.deepEqual(fields, { steps: 10, sampler: 'euler', scheduler: 'karras', seed: 12345, guidanceScale: 4.5 });
+});
+
+test('extracts scheduler from A1111 Schedule type', () => {
+  const fields = metadata.getGenerationFields({
+    parameters: 'prompt\nNegative prompt: blur\nSteps: 12, Sampler: Euler, Schedule type: beta, CFG scale: 5, Seed: 42'
+  });
+  assert.equal(fields.scheduler, 'beta');
 });
