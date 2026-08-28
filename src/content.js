@@ -928,6 +928,36 @@
       .sort((left, right) => (/^save/i.test(left.label) ? -1 : 1) - (/^save/i.test(right.label) ? -1 : 1))[0]?.element || null;
   }
 
+  const CIVITAI_PROMPT_FIELDS = {
+    negative: '[name="negativePrompt"], #input_negativePrompt',
+    guidanceScale: '[name="cfgScale"], #input_cfgScale',
+    steps: '[name="steps"], #input_steps',
+    sampler: '#input_sampler, [name="sampler"]:not([type="hidden"])',
+    seed: '[name="seed"], #input_seed'
+  };
+
+  function promptField(root, name, label) {
+    const selector = CIVITAI_PROMPT_FIELDS[name];
+    const direct = selector ? visibleElements(selector, root)[0] : null;
+    if (direct) return direct;
+    return visibleElements('textarea, input:not([type="file"]):not([type="hidden"]), [contenteditable="true"]', root)
+      .find((element) => label.test(elementLabel(element).toLowerCase())) || null;
+  }
+
+  async function selectPromptSampler(root, value) {
+    if (value === null || value === undefined || value === '') return false;
+    const field = promptField(root, 'sampler', /^sampler$/i);
+    if (!field) return false;
+    field.click();
+    dispatchInput(field, String(value));
+    const wanted = normalizeText(value).toLowerCase();
+    const option = await waitForDomCondition(() => visibleElements('[role="option"], [data-combobox-option]')
+      .find((candidate) => normalizeText(candidate.textContent).toLowerCase() === wanted), 5000);
+    if (!option) return false;
+    option.click();
+    return true;
+  }
+
   async function fillCivitaiPrompt() {
     if (state.busy) return;
     if (!hasPromptTarget()) {
@@ -965,29 +995,38 @@
       render();
       return;
     }
-    const root = promptEditorRoot(editor) || getDialogRoot();
+    let root = promptEditorRoot(editor) || getDialogRoot();
+    // Civitai mounts the positive prompt first, then adds the other Mantine
+    // controls. Wait for the complete form instead of racing that second render.
+    const completeRoot = await waitForDomCondition(() => {
+      const candidate = promptEditorRoot(editor) || getDialogRoot();
+      const ready = ['guidanceScale', 'steps', 'sampler', 'seed']
+        .filter((name) => promptField(candidate, name, new RegExp(`^${name}$`, 'i'))).length;
+      return ready >= 4 ? candidate : null;
+    }, 8000);
+    if (completeRoot) root = completeRoot;
     dispatchInput(editor, prompt.positive);
-    const negativeEditor = findPromptEditor(root || document, true);
+    const negativeEditor = promptField(root, 'negative', /^negative prompt$/i)
+      || findPromptEditor(root || document, true);
     const filledFields = ['positive prompt'];
     if (negativeEditor && negativeEditor !== editor && prompt.negative) {
       dispatchInput(negativeEditor, prompt.negative);
       filledFields.push('negative prompt');
     }
     const generation = globalThis.CVMMetadata.getGenerationFields(state.parsed?.metadata || {});
-    const fillLabeledField = (name, label, value) => {
+    const fillLabeledField = (name, key, label, value) => {
       if (value === null || value === undefined || value === '') return false;
-      const field = visibleElements('textarea, input:not([type="file"]), [contenteditable="true"]', root || document)
-        .find((element) => label.test(elementLabel(element).toLowerCase()));
+      const field = promptField(root || document, key, label);
       if (!field || field === editor || field === negativeEditor) return false;
       dispatchInput(field, String(value));
       filledFields.push(name);
       return true;
     };
-    fillLabeledField('guidance scale', /^guidance scale$/i, generation.guidanceScale);
-    fillLabeledField('steps', /^steps$/i, generation.steps);
-    fillLabeledField('sampler', /^sampler$/i, generation.sampler);
-    fillLabeledField('scheduler', /^(scheduler|schedule type)$/i, generation.scheduler);
-    fillLabeledField('seed', /^seed$/i, generation.seed);
+    fillLabeledField('guidance scale', 'guidanceScale', /^guidance scale$/i, generation.guidanceScale);
+    fillLabeledField('steps', 'steps', /^steps$/i, generation.steps);
+    if (await selectPromptSampler(root, generation.sampler)) filledFields.push('sampler');
+    fillLabeledField('scheduler', 'scheduler', /^(scheduler|schedule type)$/i, generation.scheduler);
+    fillLabeledField('seed', 'seed', /^seed$/i, generation.seed);
     const saveButton = await waitForDomCondition(() => findPromptSaveButton(root), 3000);
     if (saveButton) {
       saveButton.click();

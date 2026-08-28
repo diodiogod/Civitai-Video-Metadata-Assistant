@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.2 - 2026-08-28
+
+- Wait for Civitai's complete prompt form instead of racing its delayed secondary-field render.
+- Target Civitai's stable field names for guidance, steps, sampler, seed, and negative prompt.
+- Select sampler values through the Mantine dropdown rather than assigning uncommitted text.
+
 ## 0.6.1 - 2026-08-28
 
 - Fixed Civitai's nested prompt-dialog detection so negative prompt and generation fields are filled alongside the positive prompt.
