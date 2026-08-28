@@ -979,9 +979,13 @@
           data: text[index]
         }));
       }
-      field.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
     }
-    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    // A programmatic Save click does not blur the active input. Mantine's
+    // formatted seed control needs the final change/blur boundary to commit
+    // its displayed text into the React form state before submission.
+    field.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+    field.blur();
+    await new Promise((resolve) => window.setTimeout(resolve, 100));
     return field.value === text;
   }
 

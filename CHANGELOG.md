@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.4 - 2026-08-28
+
+- Commit and blur Civitai's controlled Seed input before the extension programmatically saves the prompt form.
+
 ## 0.6.3 - 2026-08-28
 
 - Fill Civitai's specially controlled Seed input through native text insertion and verify that React retained the complete value.
