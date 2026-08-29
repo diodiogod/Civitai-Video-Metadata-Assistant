@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.11 - 2026-08-29
+
+- Declare that the Firefox extension does not collect data, as required by Mozilla's built-in data-consent validation.
+- Replace dynamic `innerHTML` assignments with DOM fragment replacement and keep all interpolated values escaped.
+
 ## 0.6.10 - 2026-08-29
 
 - Bind direct Civitai video drops to the newly created media row before applying prompts or resources.

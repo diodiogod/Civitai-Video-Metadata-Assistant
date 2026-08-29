@@ -382,6 +382,14 @@
     }).join('');
   }
 
+  function replacePanelContents(panel, markup) {
+    const range = document.createRange();
+    range.selectNodeContents(panel);
+    // Render-only strings interpolate escaped metadata; controls and labels are extension-owned markup.
+    // eslint-disable-next-line no-unsanitized/method
+    panel.replaceChildren(range.createContextualFragment(markup));
+  }
+
   function render() {
     const panel = getPanel();
     if (!panel) return;
@@ -399,15 +407,15 @@
     const container = state.parsed?.container ? state.parsed.container.toUpperCase() : '';
     panel.classList.toggle('cvm-collapsed', state.collapsed);
     if (state.collapsed) {
-      panel.innerHTML = `
+      replacePanelContents(panel, `
         <div class="cvm-header">
           <div><strong>Civitai Video Metadata</strong><small>${state.queue.length ? `${state.queue.length} video${state.queue.length === 1 ? '' : 's'} queued` : 'click to reopen'}</small></div>
           <button type="button" class="cvm-icon" data-cvm-action="toggle-collapse" title="Expand assistant" aria-label="Expand Civitai Video Metadata Assistant" aria-expanded="false">▣</button>
-        </div>`;
+        </div>`);
       panel.querySelector('[data-cvm-action]')?.addEventListener('click', () => handleAction('toggle-collapse'));
       return;
     }
-    panel.innerHTML = `
+    replacePanelContents(panel, `
       <div class="cvm-header">
         <div><strong>Civitai Video Metadata</strong><small>${container ? `${container} · ` : ''}${escapeHtml(state.file?.name || 'no video selected')}</small></div>
         <div class="cvm-header-actions">
@@ -444,7 +452,7 @@
       <div class="cvm-step cvm-next-step"><b>4</b><span><strong>Continue with another video</strong><small>Keep the existing Civitai uploads and clear only this assistant.</small></span></div>
       <div class="cvm-next-action"><button type="button" data-cvm-action="next" ${!state.file && !state.parsed ? 'disabled' : ''}>Start next video</button></div>
       <details class="cvm-activity"><summary>Activity &amp; issues <span>${state.activity.length}</span></summary><ul>${activityRows()}</ul><button type="button" data-cvm-action="clear-log" ${!state.activity.length ? 'disabled' : ''}>Clear activity</button></details>
-      <div class="cvm-footnote">${!promptTargetReady ? 'Multiple Civitai videos are present. Use this file in Civitai upload first so the assistant can bind it to the correct row.' : state.autoEverything ? 'Automatic mode handles the upload form but never publishes the post.' : 'The file is read locally. Nothing is uploaded or submitted automatically.'}</div>`;
+      <div class="cvm-footnote">${!promptTargetReady ? 'Multiple Civitai videos are present. Use this file in Civitai upload first so the assistant can bind it to the correct row.' : state.autoEverything ? 'Automatic mode handles the upload form but never publishes the post.' : 'The file is read locally. Nothing is uploaded or submitted automatically.'}</div>`);
     panel.querySelectorAll('[data-cvm-action]').forEach((button) => button.addEventListener('click', () => handleAction(button.dataset.cvmAction)));
     panel.querySelector('[data-cvm-auto-advance]')?.addEventListener('change', (event) => {
       state.autoAdvanceResources = event.target.checked;
