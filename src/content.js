@@ -208,6 +208,45 @@
     return null;
   }
 
+  function videoMediaContainers() {
+    return [...new Set([...document.querySelectorAll('video')]
+      .map((video) => mediaContainerFor(video))
+      .filter(Boolean))];
+  }
+
+  function waitForNewVideoContainer(existingContainers, watchdogMs = 120000) {
+    const initialCount = existingContainers.size;
+    return waitForDomCondition(() => {
+      const containers = videoMediaContainers();
+      if (containers.length <= initialCount) return null;
+      const fresh = containers.filter((container) => !existingContainers.has(container));
+      // Civitai may rerender an older row while appending the upload. The new
+      // upload is the last row once the total row count has increased.
+      return fresh[fresh.length - 1] || containers[containers.length - 1] || null;
+    }, watchdogMs);
+  }
+
+  async function bindDirectPageDrop(file, existingContainers) {
+    const key = keyForFile(file);
+    const bindingToken = ++state.uploadToken;
+    state.uploadFileKey = key;
+    state.targetMediaContainer = null;
+    state.targetMediaFileKey = '';
+    const container = await waitForNewVideoContainer(existingContainers);
+    if (bindingToken !== state.uploadToken || state.fileKey !== key) return;
+    if (!container) {
+      state.message = 'Civitai received the video, but its new details row could not be identified.';
+      render();
+      return;
+    }
+    state.targetMediaContainer = container;
+    state.targetMediaFileKey = key;
+    state.message = 'Civitai created this video’s row. Prompt and resource actions are bound to it.';
+    setQueueStatus('applying', 'Video uploaded; applying metadata');
+    addActivity('success', 'Direct Civitai upload bound to its new media row.');
+    render();
+  }
+
   function currentTargetRoot() {
     if (state.targetMediaFileKey === state.fileKey && state.targetMediaContainer?.isConnected) {
       return state.targetMediaContainer;
@@ -237,7 +276,7 @@
       setQueueStatus('uploading', 'Uploading to Civitai');
       const uploadToken = ++state.uploadToken;
       const handedOffFileKey = state.fileKey;
-      const existingMedia = new Set(document.querySelectorAll('video'));
+      const existingContainers = new Set(videoMediaContainers());
       const transfer = new DataTransfer();
       transfer.items.add(state.file);
       input.files = transfer.files;
@@ -252,22 +291,14 @@
       state.targetMediaFileKey = '';
       state.message = 'Video handed to Civitai. Waiting for its new preview row…';
       render();
-      const newVideo = await waitForDomCondition(() => [...document.querySelectorAll('video')]
-        .find((video) => !existingMedia.has(video)), 120000);
+      const newContainer = await waitForNewVideoContainer(existingContainers);
       if (uploadToken !== state.uploadToken) return;
-      if (newVideo) {
-        state.targetMediaContainer = mediaContainerFor(newVideo);
+      if (newContainer) {
+        state.targetMediaContainer = newContainer;
         state.targetMediaFileKey = handedOffFileKey;
-        state.message = state.targetMediaContainer
-          ? 'Civitai created this video’s row. Prompt and resource actions will target it.'
-          : 'Civitai uploaded the video, but its details row could not be identified.';
-        if (state.targetMediaContainer) {
-          setQueueStatus('applying', 'Video uploaded; applying metadata');
-          addActivity('success', 'Uploaded and bound to the correct Civitai row.');
-        } else {
-          setQueueStatus('error', 'Uploaded, but row binding failed');
-          addActivity('error', 'Civitai uploaded the video, but the row could not be identified.');
-        }
+        state.message = 'Civitai created this video’s row. Prompt and resource actions will target it.';
+        setQueueStatus('applying', 'Video uploaded; applying metadata');
+        addActivity('success', 'Uploaded and bound to the correct Civitai row.');
       } else {
         state.message = 'Civitai did not expose a new video row. Prompt targeting is unavailable for this upload.';
       }
@@ -465,6 +496,10 @@
     state.busy = true;
     state.file = file;
     state.fileKey = key;
+    if (state.targetMediaFileKey !== key) {
+      state.targetMediaContainer = null;
+      state.targetMediaFileKey = '';
+    }
     state.promptFilled = false;
     state.guidedResourceId = '';
     state.skipped.clear();
@@ -1327,7 +1362,11 @@
   async function runAutomaticWorkflow(scanToken) {
     const queueId = state.activeQueueId;
     if (scanToken !== state.scanToken || !state.autoEverything) return;
-    await useFileInCivitaiUpload();
+    if (state.uploadFileKey === state.fileKey) {
+      await waitForDomCondition(() => state.targetMediaFileKey === state.fileKey && state.targetMediaContainer?.isConnected, 120000);
+    } else {
+      await useFileInCivitaiUpload();
+    }
     if (scanToken !== state.scanToken || state.targetMediaFileKey !== state.fileKey) return;
     await fillCivitaiPrompt();
     if (scanToken !== state.scanToken || state.activeQueueId !== queueId) return;
@@ -1373,8 +1412,10 @@
       if (event.target?.closest?.(`#${EXTENSION_ID}`)) return;
       const file = [...(event.dataTransfer?.files || [])].find((candidate) => candidate.type.startsWith('video/') || /\.(mp4|webm)$/i.test(candidate.name));
       if (file) {
+        const existingContainers = new Set(videoMediaContainers());
         lastObservedFileKey = '';
         scanFile(file);
+        bindDirectPageDrop(file, existingContainers);
       }
     }, true);
     document.addEventListener('click', (event) => {

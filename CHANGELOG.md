@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.10 - 2026-08-29
+
+- Bind direct Civitai video drops to the newly created media row before applying prompts or resources.
+- Identify new uploads by media-row count and position so rerendered older video elements cannot steal the binding.
+
 ## 0.6.9 - 2026-08-29
 
 - Scan the complete Civitai Resources card instead of stopping at its header row.
