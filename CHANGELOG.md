@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.9 - 2026-08-29
+
+- Scan the complete Civitai Resources card instead of stopping at its header row.
+- Recover from an already-open duplicate picker by recognizing the attached model and closing the picker.
+
 ## 0.6.8 - 2026-08-29
 
 - Detect resources Civitai preattaches when a post is started from a model gallery.

@@ -587,12 +587,18 @@
 
   function resourceSectionRoot(button) {
     let candidate = button?.parentElement || null;
+    let headingContainer = null;
     for (let depth = 0; candidate && candidate !== document.body && depth < 14; depth += 1, candidate = candidate.parentElement) {
       const hasResourcesHeading = [...candidate.querySelectorAll('h1, h2, h3, h4, h5, h6, legend')]
         .some((heading) => /^resources$/i.test(normalizeText(heading.textContent)));
-      if (hasResourcesHeading) return candidate;
+      if (!hasResourcesHeading) continue;
+      if (!headingContainer) headingContainer = candidate;
+      const hasAttachedCards = candidate.querySelector(
+        'a[href*="/models/"], a[href*="/model-versions/"], [data-model-id], [data-model-version-id], [data-version-id]'
+      );
+      if (hasAttachedCards) return candidate;
     }
-    return null;
+    return headingContainer;
   }
 
   function attachedResourceSnapshot(button) {
@@ -629,14 +635,27 @@
 
   function markAlreadyAttachedResources(button) {
     const attached = attachedResourceSnapshot(button);
+    const matched = [];
     for (const resource of state.resources) {
       const id = resourceId(resource);
       if (!resource.lookup || state.added.has(id) || state.skipped.has(id)) continue;
       const match = globalThis.CVMMetadata.resourceIsAlreadyAttached(resource, attached);
       if (!match.matched) continue;
       state.added.add(id);
+      matched.push(id);
       addActivity('success', `${resourceName(resource)} is already attached in Civitai (${match.method}); duplicate search skipped.`);
     }
+    return matched;
+  }
+
+  function closeResourcePicker(root = getDialogRoot()) {
+    const closeButton = visibleElements('button, [role="button"]', root).find((button) => {
+      const label = normalizeText(`${button.textContent} ${button.getAttribute('aria-label') || ''} ${button.getAttribute('title') || ''}`);
+      return /mantine-CloseButton-root/.test(String(button.className)) || /^(close|cancel)$/i.test(label);
+    });
+    if (!closeButton) return false;
+    closeButton.click();
+    return true;
   }
 
   function getDialogRoot() {
@@ -874,13 +893,24 @@
 
   async function addResources({ autoSelect = false } = {}) {
     if (!state.resources.length || state.busy) return;
+    const existingResourceButton = findResourceButton();
+    const newlyMatched = existingResourceButton ? markAlreadyAttachedResources(existingResourceButton) : [];
     if (pickerIsOpen()) {
-      state.message = 'Finish or close the current Civitai resource picker before searching for the next resource.';
+      const currentWasAlreadyAttached = state.guidedResourceId && state.added.has(state.guidedResourceId);
+      if (currentWasAlreadyAttached) {
+        state.guidedSelectionPending = true;
+        const closed = closeResourcePicker();
+        state.message = closed
+          ? 'That model is already attached in Civitai. The duplicate picker was closed.'
+          : 'That model is already attached in Civitai. Close the duplicate picker to continue.';
+      } else {
+        state.message = newlyMatched.length
+          ? 'Existing Civitai resources were recognized. Finish or close the current picker to continue.'
+          : 'Finish or close the current Civitai resource picker before searching for the next resource.';
+      }
       render();
       return;
     }
-    const existingResourceButton = findResourceButton();
-    if (existingResourceButton) markAlreadyAttachedResources(existingResourceButton);
     const remaining = state.resources.filter((resource) => resource.lookup && !state.added.has(resourceId(resource)) && !state.skipped.has(resourceId(resource)));
     const resource = remaining[0];
     if (!resource) {
