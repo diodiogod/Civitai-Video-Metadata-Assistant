@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.12 - 2026-08-29
+
+- Build the assistant panel entirely with DOM APIs instead of parsing dynamic HTML.
+- Pass Mozilla's add-on validator with no errors, warnings, or notices.
+
 ## 0.6.11 - 2026-08-29
 
 - Declare that the Firefox extension does not collect data, as required by Mozilla's built-in data-consent validation.

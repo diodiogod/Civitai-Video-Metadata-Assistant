@@ -46,7 +46,6 @@
 
   const visible = (element) => Boolean(element && element.isConnected && element.getClientRects().length && getComputedStyle(element).visibility !== 'hidden');
   const normalizeText = (value) => String(value || '').replace(/\s+/g, ' ').trim();
-  const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
 
   function getPanel() {
     return document.getElementById(EXTENSION_ID);
@@ -152,22 +151,80 @@
     }
   }
 
-  function queueRows() {
-    if (!state.queue.length) return '<div class="cvm-empty">No videos queued.</div>';
-    return state.queue.map((item, index) => {
-      const active = item.id === state.activeQueueId;
-      const canRemove = item.status === 'waiting' || item.status === 'error' || item.status === 'skipped';
-      return `<li class="cvm-queue-item ${active ? 'cvm-queue-active' : ''}">
-        <b>${index + 1}</b><span><strong>${escapeHtml(item.file.name)}</strong><small>${escapeHtml(item.message || item.status)}</small></span>
-        <em class="cvm-queue-status cvm-q-${escapeHtml(item.status)}">${escapeHtml(item.status)}</em>
-        <span class="cvm-queue-actions">${item.status === 'error' ? `<button data-cvm-queue-action="retry" data-cvm-id="${item.id}">Retry</button>` : ''}${canRemove ? `<button data-cvm-queue-action="remove" data-cvm-id="${item.id}">Remove</button>` : ''}</span>
-      </li>`;
-    }).join('');
+  function element(tag, className = '', text = '') {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== '') node.textContent = String(text);
+    return node;
   }
 
-  function activityRows() {
-    if (!state.activity.length) return '<div class="cvm-empty">No activity yet.</div>';
-    return state.activity.map((entry) => `<li class="cvm-log-${entry.level}"><time>${escapeHtml(entry.time)}</time><span><strong>${escapeHtml(entry.fileName)}</strong>${escapeHtml(entry.message)}</span></li>`).join('');
+  function actionButton(action, text, options = {}) {
+    const button = element('button', options.className || '', text);
+    button.type = 'button';
+    button.dataset.cvmAction = action;
+    button.disabled = Boolean(options.disabled);
+    if (options.title) button.title = options.title;
+    if (options.ariaLabel) button.setAttribute('aria-label', options.ariaLabel);
+    if (options.ariaExpanded !== undefined) button.setAttribute('aria-expanded', String(options.ariaExpanded));
+    return button;
+  }
+
+  function stepRow(number, title, description, extraClass = '') {
+    const row = element('div', `cvm-step${extraClass ? ` ${extraClass}` : ''}`);
+    row.append(element('b', '', number));
+    const copy = element('span');
+    copy.append(element('strong', '', title), element('small', '', description));
+    row.append(copy);
+    return row;
+  }
+
+  function queueList() {
+    const list = element('ul', 'cvm-queue');
+    if (!state.queue.length) {
+      list.append(element('div', 'cvm-empty', 'No videos queued.'));
+      return list;
+    }
+    state.queue.forEach((item, index) => {
+      const active = item.id === state.activeQueueId;
+      const canRemove = item.status === 'waiting' || item.status === 'error' || item.status === 'skipped';
+      const row = element('li', `cvm-queue-item${active ? ' cvm-queue-active' : ''}`);
+      const copy = element('span');
+      copy.append(element('strong', '', item.file.name), element('small', '', item.message || item.status));
+      const actions = element('span', 'cvm-queue-actions');
+      const queueButton = (action, text) => {
+        const button = element('button', '', text);
+        button.type = 'button';
+        button.dataset.cvmQueueAction = action;
+        button.dataset.cvmId = item.id;
+        return button;
+      };
+      if (item.status === 'error') actions.append(queueButton('retry', 'Retry'));
+      if (canRemove) actions.append(queueButton('remove', 'Remove'));
+      row.append(
+        element('b', '', index + 1),
+        copy,
+        element('em', `cvm-queue-status cvm-q-${item.status}`, item.status),
+        actions
+      );
+      list.append(row);
+    });
+    return list;
+  }
+
+  function activityList() {
+    const list = element('ul');
+    if (!state.activity.length) {
+      list.append(element('div', 'cvm-empty', 'No activity yet.'));
+      return list;
+    }
+    state.activity.forEach((entry) => {
+      const row = element('li', `cvm-log-${entry.level}`);
+      const copy = element('span');
+      copy.append(element('strong', '', entry.fileName), document.createTextNode(entry.message));
+      row.append(element('time', '', entry.time), copy);
+      list.append(row);
+    });
+    return list;
   }
 
   function getFileFromPage() {
@@ -363,31 +420,29 @@
     return globalThis.CVMMetadata.getResourceSearchQueries(resource);
   }
 
-  function resourceRows() {
-    if (!state.resources.length) return '<div class="cvm-empty">No Civitai resources were found in this video.</div>';
-    return state.resources.map((resource) => {
+  function resourceList() {
+    const list = element('ul', 'cvm-resources');
+    if (!state.resources.length) {
+      list.append(element('div', 'cvm-empty', 'No Civitai resources were found in this video.'));
+      return list;
+    }
+    state.resources.forEach((resource) => {
       const id = resourceId(resource);
       const title = resourceName(resource);
-      const detail = resource.lookup ? `version ${escapeHtml(resource.lookup.name || resource.lookup.id)}` : resource.hash ? `hash ${escapeHtml(resource.hash)}` : 'metadata identifier';
-      const status = state.added.has(id)
-        ? '<span class="cvm-status cvm-ok">added</span>'
-        : state.skipped.has(id)
-          ? '<span class="cvm-status cvm-skip">skipped</span>'
-        : state.guidedResourceId === id
-          ? '<span class="cvm-status cvm-current">select now</span>'
-          : resource.lookup
-            ? '<span class="cvm-status cvm-ready">queued</span>'
-            : '<span class="cvm-status cvm-warn">unresolved</span>';
-      return `<li class="cvm-resource"><span><strong>${escapeHtml(title)}</strong><small>${detail}</small></span>${status}</li>`;
-    }).join('');
-  }
-
-  function replacePanelContents(panel, markup) {
-    const range = document.createRange();
-    range.selectNodeContents(panel);
-    // Render-only strings interpolate escaped metadata; controls and labels are extension-owned markup.
-    // eslint-disable-next-line no-unsanitized/method
-    panel.replaceChildren(range.createContextualFragment(markup));
+      const detail = resource.lookup ? `version ${resource.lookup.name || resource.lookup.id}` : resource.hash ? `hash ${resource.hash}` : 'metadata identifier';
+      let statusClass = 'cvm-warn';
+      let statusText = 'unresolved';
+      if (state.added.has(id)) [statusClass, statusText] = ['cvm-ok', 'added'];
+      else if (state.skipped.has(id)) [statusClass, statusText] = ['cvm-skip', 'skipped'];
+      else if (state.guidedResourceId === id) [statusClass, statusText] = ['cvm-current', 'select now'];
+      else if (resource.lookup) [statusClass, statusText] = ['cvm-ready', 'queued'];
+      const copy = element('span');
+      copy.append(element('strong', '', title), element('small', '', detail));
+      const row = element('li', 'cvm-resource');
+      row.append(copy, element('span', `cvm-status ${statusClass}`, statusText));
+      list.append(row);
+    });
+    return list;
   }
 
   function render() {
@@ -406,53 +461,127 @@
     const promptTargetReady = hasPromptTarget();
     const container = state.parsed?.container ? state.parsed.container.toUpperCase() : '';
     panel.classList.toggle('cvm-collapsed', state.collapsed);
+
+    const headerCopy = element('div');
+    headerCopy.append(
+      element('strong', '', 'Civitai Video Metadata'),
+      element('small', '', state.collapsed
+        ? (state.queue.length ? `${state.queue.length} video${state.queue.length === 1 ? '' : 's'} queued` : 'click to reopen')
+        : `${container ? `${container} · ` : ''}${state.file?.name || 'no video selected'}`)
+    );
+    const header = element('div', 'cvm-header');
+
     if (state.collapsed) {
-      replacePanelContents(panel, `
-        <div class="cvm-header">
-          <div><strong>Civitai Video Metadata</strong><small>${state.queue.length ? `${state.queue.length} video${state.queue.length === 1 ? '' : 's'} queued` : 'click to reopen'}</small></div>
-          <button type="button" class="cvm-icon" data-cvm-action="toggle-collapse" title="Expand assistant" aria-label="Expand Civitai Video Metadata Assistant" aria-expanded="false">▣</button>
-        </div>`);
+      header.append(headerCopy, actionButton('toggle-collapse', '▣', {
+        className: 'cvm-icon',
+        title: 'Expand assistant',
+        ariaLabel: 'Expand Civitai Video Metadata Assistant',
+        ariaExpanded: false
+      }));
+      panel.replaceChildren(header);
       panel.querySelector('[data-cvm-action]')?.addEventListener('click', () => handleAction('toggle-collapse'));
       return;
     }
-    replacePanelContents(panel, `
-      <div class="cvm-header">
-        <div><strong>Civitai Video Metadata</strong><small>${container ? `${container} · ` : ''}${escapeHtml(state.file?.name || 'no video selected')}</small></div>
-        <div class="cvm-header-actions">
-          <button type="button" class="cvm-icon" data-cvm-action="scan" title="Scan the current upload" aria-label="Scan the current upload">↻</button>
-          <button type="button" class="cvm-icon" data-cvm-action="toggle-collapse" title="Collapse assistant" aria-label="Collapse Civitai Video Metadata Assistant" aria-expanded="true">−</button>
-        </div>
-      </div>
-      <div class="cvm-message">${escapeHtml(state.message)}</div>
-      <label class="cvm-master-mode"><input type="checkbox" data-cvm-auto-everything ${state.autoEverything ? 'checked' : ''}> Do everything automatically after I drop a video</label>
-      <div class="cvm-step"><b>1</b><span><strong>Choose the video</strong><small>Drop it below. Metadata stays local until you send the file to Civitai.</small></span></div>
-      <ul class="cvm-queue">${queueRows()}</ul>
-      ${state.parsed ? `<div class="cvm-summary"><span>${state.resources.length} resource${state.resources.length === 1 ? '' : 's'}</span><span>${prompt.positive ? 'positive prompt' : 'no prompt text'}</span><span>${prompt.negative ? 'negative prompt' : 'no negative prompt'}</span>${generationSummary.map((item) => `<span>${escapeHtml(item)}</span>`).join('')}<span>${metadata.workflow ? 'workflow' : 'no workflow'}</span></div>` : ''}
-      ${state.parsed ? '<div class="cvm-step"><b>2</b><span><strong>Review metadata</strong><small>Check the detected prompt, settings, and resources.</small></span></div>' : ''}
-      ${prompt.positive ? `<div class="cvm-prompt"><strong>Prompt</strong><div>${escapeHtml(prompt.positive)}</div>${prompt.negative ? `<small>Negative: ${escapeHtml(prompt.negative)}</small>` : ''}</div>` : ''}
-      ${state.parsed ? `<ul class="cvm-resources">${resourceRows()}</ul>` : ''}
-      ${state.resources.length ? `<div class="cvm-step"><b>3</b><span><strong>Apply to Civitai</strong><small>Fill the bound video row and add exact resource matches.</small></span></div><label class="cvm-resource-mode"><input type="checkbox" data-cvm-auto-advance ${state.autoAdvanceResources ? 'checked' : ''}> Open the next resolved resource after this picker closes</label>` : ''}
-      <div id="cvm-dropzone" class="cvm-dropzone" tabindex="0">
-        <strong>Drop one or more MP4/WebM videos here</strong>
-        <small>Videos are processed sequentially so each one stays bound to its own Civitai row.</small>
-      </div>
-      <div class="cvm-file-row">
-        <button type="button" data-cvm-action="choose">Read local video metadata</button>
-        <input id="cvm-file-picker" type="file" accept="video/mp4,video/webm,.mp4,.webm" multiple hidden>
-      </div>
-      <div class="cvm-section-label">Manual controls</div>
-      <div class="cvm-actions">
-        <button type="button" data-cvm-action="upload" ${!state.file ? 'disabled' : ''}>Use this file in Civitai upload</button>
-        <button type="button" class="cvm-primary" data-cvm-action="prompt" ${state.busy || !prompt.positive || state.promptFilled || !promptTargetReady ? 'disabled' : ''}>Fill this video’s prompt</button>
-        <button type="button" data-cvm-action="copy-prompt" ${!prompt.positive ? 'disabled' : ''}>Copy prompt</button>
-        <button type="button" data-cvm-action="add" ${state.busy || !state.resources.length ? 'disabled' : ''}>Find next resource</button>
-        <button type="button" data-cvm-action="auto-add" ${state.busy || !state.resources.some((resource) => resource.lookup) ? 'disabled' : ''}>Auto-add exact resources</button>
-        <button type="button" data-cvm-action="copy" ${!state.parsed ? 'disabled' : ''}>Copy metadata</button>
-      </div>
-      <div class="cvm-step cvm-next-step"><b>4</b><span><strong>Continue with another video</strong><small>Keep the existing Civitai uploads and clear only this assistant.</small></span></div>
-      <div class="cvm-next-action"><button type="button" data-cvm-action="next" ${!state.file && !state.parsed ? 'disabled' : ''}>Start next video</button></div>
-      <details class="cvm-activity"><summary>Activity &amp; issues <span>${state.activity.length}</span></summary><ul>${activityRows()}</ul><button type="button" data-cvm-action="clear-log" ${!state.activity.length ? 'disabled' : ''}>Clear activity</button></details>
-      <div class="cvm-footnote">${!promptTargetReady ? 'Multiple Civitai videos are present. Use this file in Civitai upload first so the assistant can bind it to the correct row.' : state.autoEverything ? 'Automatic mode handles the upload form but never publishes the post.' : 'The file is read locally. Nothing is uploaded or submitted automatically.'}</div>`);
+
+    const headerActions = element('div', 'cvm-header-actions');
+    headerActions.append(
+      actionButton('scan', '↻', { className: 'cvm-icon', title: 'Scan the current upload', ariaLabel: 'Scan the current upload' }),
+      actionButton('toggle-collapse', '−', { className: 'cvm-icon', title: 'Collapse assistant', ariaLabel: 'Collapse Civitai Video Metadata Assistant', ariaExpanded: true })
+    );
+    header.append(headerCopy, headerActions);
+
+    const autoEverything = document.createElement('input');
+    autoEverything.type = 'checkbox';
+    autoEverything.dataset.cvmAutoEverything = '';
+    autoEverything.checked = state.autoEverything;
+    const masterMode = element('label', 'cvm-master-mode');
+    masterMode.append(autoEverything, document.createTextNode(' Do everything automatically after I drop a video'));
+
+    const nodes = [
+      header,
+      element('div', 'cvm-message', state.message),
+      masterMode,
+      stepRow(1, 'Choose the video', 'Drop it below. Metadata stays local until you send the file to Civitai.'),
+      queueList()
+    ];
+
+    if (state.parsed) {
+      const summary = element('div', 'cvm-summary');
+      [
+        `${state.resources.length} resource${state.resources.length === 1 ? '' : 's'}`,
+        prompt.positive ? 'positive prompt' : 'no prompt text',
+        prompt.negative ? 'negative prompt' : 'no negative prompt',
+        ...generationSummary,
+        metadata.workflow ? 'workflow' : 'no workflow'
+      ].forEach((item) => summary.append(element('span', '', item)));
+      nodes.push(summary, stepRow(2, 'Review metadata', 'Check the detected prompt, settings, and resources.'));
+      if (prompt.positive) {
+        const promptBox = element('div', 'cvm-prompt');
+        promptBox.append(element('strong', '', 'Prompt'), element('div', '', prompt.positive));
+        if (prompt.negative) promptBox.append(element('small', '', `Negative: ${prompt.negative}`));
+        nodes.push(promptBox);
+      }
+      nodes.push(resourceList());
+    }
+
+    if (state.resources.length) {
+      nodes.push(stepRow(3, 'Apply to Civitai', 'Fill the bound video row and add exact resource matches.'));
+      const autoAdvance = document.createElement('input');
+      autoAdvance.type = 'checkbox';
+      autoAdvance.dataset.cvmAutoAdvance = '';
+      autoAdvance.checked = state.autoAdvanceResources;
+      const resourceMode = element('label', 'cvm-resource-mode');
+      resourceMode.append(autoAdvance, document.createTextNode(' Open the next resolved resource after this picker closes'));
+      nodes.push(resourceMode);
+    }
+
+    const dropArea = element('div', 'cvm-dropzone');
+    dropArea.id = 'cvm-dropzone';
+    dropArea.tabIndex = 0;
+    dropArea.append(
+      element('strong', '', 'Drop one or more MP4/WebM videos here'),
+      element('small', '', 'Videos are processed sequentially so each one stays bound to its own Civitai row.')
+    );
+    nodes.push(dropArea);
+
+    const fileRow = element('div', 'cvm-file-row');
+    const filePicker = document.createElement('input');
+    filePicker.id = 'cvm-file-picker';
+    filePicker.type = 'file';
+    filePicker.accept = 'video/mp4,video/webm,.mp4,.webm';
+    filePicker.multiple = true;
+    filePicker.hidden = true;
+    fileRow.append(actionButton('choose', 'Read local video metadata'), filePicker);
+    nodes.push(fileRow, element('div', 'cvm-section-label', 'Manual controls'));
+
+    const actions = element('div', 'cvm-actions');
+    actions.append(
+      actionButton('upload', 'Use this file in Civitai upload', { disabled: !state.file }),
+      actionButton('prompt', 'Fill this video’s prompt', { className: 'cvm-primary', disabled: state.busy || !prompt.positive || state.promptFilled || !promptTargetReady }),
+      actionButton('copy-prompt', 'Copy prompt', { disabled: !prompt.positive }),
+      actionButton('add', 'Find next resource', { disabled: state.busy || !state.resources.length }),
+      actionButton('auto-add', 'Auto-add exact resources', { disabled: state.busy || !state.resources.some((resource) => resource.lookup) }),
+      actionButton('copy', 'Copy metadata', { disabled: !state.parsed })
+    );
+    nodes.push(actions, stepRow(4, 'Continue with another video', 'Keep the existing Civitai uploads and clear only this assistant.', 'cvm-next-step'));
+
+    const nextAction = element('div', 'cvm-next-action');
+    nextAction.append(actionButton('next', 'Start next video', { disabled: !state.file && !state.parsed }));
+    nodes.push(nextAction);
+
+    const activity = element('details', 'cvm-activity');
+    const summary = element('summary');
+    summary.append(document.createTextNode('Activity & issues '), element('span', '', state.activity.length));
+    activity.append(summary, activityList(), actionButton('clear-log', 'Clear activity', { disabled: !state.activity.length }));
+    nodes.push(activity);
+
+    const footnote = !promptTargetReady
+      ? 'Multiple Civitai videos are present. Use this file in Civitai upload first so the assistant can bind it to the correct row.'
+      : state.autoEverything
+        ? 'Automatic mode handles the upload form but never publishes the post.'
+        : 'The file is read locally. Nothing is uploaded or submitted automatically.';
+    nodes.push(element('div', 'cvm-footnote', footnote));
+    panel.replaceChildren(...nodes);
     panel.querySelectorAll('[data-cvm-action]').forEach((button) => button.addEventListener('click', () => handleAction(button.dataset.cvmAction)));
     panel.querySelector('[data-cvm-auto-advance]')?.addEventListener('change', (event) => {
       state.autoAdvanceResources = event.target.checked;
