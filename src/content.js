@@ -585,6 +585,60 @@
     })[0] || null;
   }
 
+  function resourceSectionRoot(button) {
+    let candidate = button?.parentElement || null;
+    for (let depth = 0; candidate && candidate !== document.body && depth < 14; depth += 1, candidate = candidate.parentElement) {
+      const hasResourcesHeading = [...candidate.querySelectorAll('h1, h2, h3, h4, h5, h6, legend')]
+        .some((heading) => /^resources$/i.test(normalizeText(heading.textContent)));
+      if (hasResourcesHeading) return candidate;
+    }
+    return null;
+  }
+
+  function attachedResourceSnapshot(button) {
+    const root = resourceSectionRoot(button);
+    if (!root) return { modelIds: [], versionIds: [], text: '' };
+    const modelIds = new Set();
+    const versionIds = new Set();
+    for (const element of root.querySelectorAll('a[href], [data-model-id], [data-model-version-id], [data-version-id]')) {
+      if (element.closest(`#${EXTENSION_ID}`)) continue;
+      const modelData = element.getAttribute('data-model-id');
+      const versionData = element.getAttribute('data-model-version-id') || element.getAttribute('data-version-id');
+      if (/^\d+$/.test(modelData || '')) modelIds.add(modelData);
+      if (/^\d+$/.test(versionData || '')) versionIds.add(versionData);
+      const href = element.getAttribute('href');
+      if (!href) continue;
+      try {
+        const url = new URL(href, location.href);
+        const modelMatch = url.pathname.match(/\/models\/(\d+)/i);
+        const versionMatch = url.pathname.match(/\/model-versions\/(\d+)/i);
+        const queryVersion = url.searchParams.get('modelVersionId');
+        if (modelMatch) modelIds.add(modelMatch[1]);
+        if (versionMatch) versionIds.add(versionMatch[1]);
+        if (/^\d+$/.test(queryVersion || '')) versionIds.add(queryVersion);
+      } catch (_) {
+        // Ignore unrelated or malformed links in Civitai's resource section.
+      }
+    }
+    return {
+      modelIds: [...modelIds],
+      versionIds: [...versionIds],
+      text: normalizeText(root.textContent)
+    };
+  }
+
+  function markAlreadyAttachedResources(button) {
+    const attached = attachedResourceSnapshot(button);
+    for (const resource of state.resources) {
+      const id = resourceId(resource);
+      if (!resource.lookup || state.added.has(id) || state.skipped.has(id)) continue;
+      const match = globalThis.CVMMetadata.resourceIsAlreadyAttached(resource, attached);
+      if (!match.matched) continue;
+      state.added.add(id);
+      addActivity('success', `${resourceName(resource)} is already attached in Civitai (${match.method}); duplicate search skipped.`);
+    }
+  }
+
   function getDialogRoot() {
     const dialogs = visibleElements('[role="dialog"], [data-radix-dialog-content], [data-overlay-container]');
     return dialogs[dialogs.length - 1] || document.body;
@@ -825,6 +879,8 @@
       render();
       return;
     }
+    const existingResourceButton = findResourceButton();
+    if (existingResourceButton) markAlreadyAttachedResources(existingResourceButton);
     const remaining = state.resources.filter((resource) => resource.lookup && !state.added.has(resourceId(resource)) && !state.skipped.has(resourceId(resource)));
     const resource = remaining[0];
     if (!resource) {

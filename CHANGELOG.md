@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.8 - 2026-08-29
+
+- Detect resources Civitai preattaches when a post is started from a model gallery.
+- Skip duplicate searches by exact version ID, model ID, or the visible model name when IDs are not exposed.
+
 ## 0.6.7 - 2026-08-28
 
 - Retry resource searches by resolved and embedded model names when AutoV2 returns an explicit no-results state.

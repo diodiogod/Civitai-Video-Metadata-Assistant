@@ -213,3 +213,35 @@ test('does not repeat the same name in picker fallback searches', () => {
     { query: 'Same Model', method: 'name fallback' }
   ]);
 });
+
+test('recognizes an exact resource version already attached by Civitai', () => {
+  const match = metadata.resourceIsAlreadyAttached(
+    { lookup: { id: 456, modelId: 123, model: { name: 'Example LoRA' } } },
+    { versionIds: ['456'], modelIds: [], text: 'Resources' }
+  );
+  assert.deepEqual(match, { matched: true, method: 'version ID' });
+});
+
+test('skips another version when the same model is already attached', () => {
+  const match = metadata.resourceIsAlreadyAttached(
+    { lookup: { id: 999, modelId: 123, model: { name: 'Example LoRA' } } },
+    { versionIds: ['456'], modelIds: ['123'], text: 'Resources' }
+  );
+  assert.deepEqual(match, { matched: true, method: 'model ID' });
+});
+
+test('uses the visible model name when Civitai does not expose resource IDs', () => {
+  const match = metadata.resourceIsAlreadyAttached(
+    { lookup: { id: 999, modelId: 123, model: { name: 'Example LoRA' } } },
+    { versionIds: [], modelIds: [], text: 'Resources Example LoRA v2 LORA' }
+  );
+  assert.deepEqual(match, { matched: true, method: 'visible model name' });
+});
+
+test('does not confuse a different attached model with the target resource', () => {
+  const match = metadata.resourceIsAlreadyAttached(
+    { lookup: { id: 999, modelId: 123, model: { name: 'Example LoRA' } } },
+    { versionIds: ['888'], modelIds: ['777'], text: 'Resources Different LoRA v1' }
+  );
+  assert.deepEqual(match, { matched: false, method: '' });
+});

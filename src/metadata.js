@@ -591,6 +591,26 @@
     }).map(({ query, method }) => ({ query: query.trim(), method }));
   }
 
+  function resourceIsAlreadyAttached(resource, attached = {}) {
+    const asId = (value) => {
+      const id = Number(value);
+      return Number.isInteger(id) && id > 0 ? String(id) : '';
+    };
+    const versionId = asId(resource?.lookup?.id || resource?.modelVersionId);
+    const modelId = asId(resource?.lookup?.modelId || resource?.modelId);
+    const versionIds = new Set((attached.versionIds || []).map(asId).filter(Boolean));
+    const modelIds = new Set((attached.modelIds || []).map(asId).filter(Boolean));
+    if (versionId && versionIds.has(versionId)) return { matched: true, method: 'version ID' };
+    if (modelId && modelIds.has(modelId)) return { matched: true, method: 'model ID' };
+
+    const sectionText = String(attached.text || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const names = [resource?.lookup?.model?.name, resource?.modelName, resource?.name]
+      .filter((name) => typeof name === 'string' && name.trim().length >= 3)
+      .map((name) => name.replace(/\s+/g, ' ').trim().toLowerCase());
+    const name = names.find((candidate) => sectionText.includes(candidate));
+    return name ? { matched: true, method: 'visible model name' } : { matched: false, method: '' };
+  }
+
   return {
     parseVideoBytes,
     parseVideoFile,
@@ -600,6 +620,7 @@
     getGenerationFields,
     getResourceSearchQuery,
     getResourceSearchQueries,
+    resourceIsAlreadyAttached,
     detectContainer,
     constants: { MAX_FILE_BYTES, MAX_METADATA_BYTES, MAX_VALUE_BYTES, MAX_ELEMENTS }
   };
