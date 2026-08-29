@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.13 - 2026-08-29
+
+- Add a dedicated video-and-metadata icon for browser toolbars and extension listings.
+
 ## 0.6.12 - 2026-08-29
 
 - Build the assistant panel entirely with DOM APIs instead of parsing dynamic HTML.
