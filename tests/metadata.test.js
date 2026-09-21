@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const metadata = require('../src/metadata.js');
 
 function u32(value) {
@@ -22,7 +24,7 @@ function mp4Box(type, payload) {
 }
 
 function mp4Data(value) {
-  return mp4Box('data', concat(u32(1), u32(0), u32(0), new TextEncoder().encode(value)));
+  return mp4Box('data', concat(u32(1), u32(0), new TextEncoder().encode(value)));
 }
 
 function mp4Fixture(entries) {
@@ -69,6 +71,13 @@ test('parses MP4 mdta prompt, workflow, parameters, and resources', () => {
   assert.equal(fields.positive, 'positive');
   assert.equal(fields.negative, 'negative');
   assert.deepEqual(metadata.extractResources(parsed.metadata), [{ modelVersionId: 123, type: 'lora' }]);
+});
+
+test('preserves the first four prompt characters from a real FFmpeg MP4', () => {
+  const fixture = fs.readFileSync(path.join(__dirname, 'fixtures', 'ffmpeg-mdta-prompt.mp4'));
+  const parsed = metadata.parseVideoBytes(new Uint8Array(fixture));
+  assert.match(parsed.metadata.parameters, /^ABCDpositive prompt/);
+  assert.equal(metadata.getPromptFields(parsed.metadata).positive, 'ABCDpositive prompt');
 });
 
 test('parses WebM SimpleTag metadata', () => {
@@ -244,4 +253,48 @@ test('does not confuse a different attached model with the target resource', () 
     { versionIds: ['888'], modelIds: ['777'], text: 'Resources Different LoRA v1' }
   );
   assert.deepEqual(match, { matched: false, method: '' });
+});
+
+test('orders tool-like resources before add-ons and the base checkpoint', () => {
+  const checkpoint = { name: 'Base model', type: 'checkpoint' };
+  const lora = { name: 'Style LoRA', type: 'lora' };
+  const extension = { name: 'Video metadata helper', lookup: { model: { type: 'Other' } } };
+  assert.deepEqual(metadata.orderResourcesForPicker([checkpoint, lora, extension]), [extension, lora, checkpoint]);
+});
+
+test('keeps resource-section ancestor scans inside the current media row', () => {
+  const olderVideoRow = { name: 'older row', parentElement: null };
+  const currentVideoRow = { name: 'current row', parentElement: olderVideoRow };
+  const resourcesCard = { name: 'resources card', parentElement: currentVideoRow };
+  const buttonWrapper = { name: 'button wrapper', parentElement: resourcesCard };
+  assert.deepEqual(
+    metadata.ancestorPathWithinBoundary(buttonWrapper, currentVideoRow),
+    [buttonWrapper, resourcesCard, currentVideoRow]
+  );
+  assert.deepEqual(metadata.ancestorPathWithinBoundary(buttonWrapper, { name: 'different row' }), []);
+});
+
+test('matches a resource dropdown option by exact Civitai version ID', () => {
+  const resource = { lookup: { id: 456, name: 'MINIMAX H3 TURBO LORA v4' } };
+  assert.equal(metadata.scoreResourceVersionOption(resource, { value: '456', text: 'Newest version' }), 100);
+  assert.equal(metadata.scoreResourceVersionOption(resource, { href: '/models/123?modelVersionId=456', text: 'Newest version' }), 100);
+});
+
+test('matches an exact version name without confusing nearby version numbers', () => {
+  const resource = { lookup: { id: 456, name: 'MINIMAX H3 TURBO LORA v4' } };
+  assert.equal(metadata.scoreResourceVersionOption(resource, { text: 'MINIMAX H3 TURBO LORA v4' }), 80);
+  assert.equal(metadata.scoreResourceVersionOption(resource, { text: 'MINIMAX H3 TURBO v4.5 ALF' }), 0);
+  assert.equal(metadata.scoreResourceVersionOption(resource, { text: 'V1.0 ALPHA' }), 0);
+});
+
+test('does not treat identical resource IDs as the same async video operation', () => {
+  const firstVideo = { scanToken: 10, queueId: 'video-1', fileKey: 'first.mp4:100:1' };
+  const secondVideo = { scanToken: 11, queueId: 'video-2', fileKey: 'second.mp4:100:2' };
+  assert.equal(metadata.sameAsyncOperation(firstVideo, firstVideo), true);
+  assert.equal(metadata.sameAsyncOperation(firstVideo, secondVideo), false);
+});
+
+test('maps every simultaneous direct-drop video to its own appended Civitai row', () => {
+  assert.deepEqual(metadata.directDropMediaIndexes(2, 2, 4), [2, 3]);
+  assert.deepEqual(metadata.directDropMediaIndexes(2, 2, 3), []);
 });

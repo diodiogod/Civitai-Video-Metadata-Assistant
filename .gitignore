@@ -2,3 +2,6 @@ dist/
 *.zip
 node_modules/
 .DS_Store
+
+# Local Codex mistake evidence
+/.agents/oops/ledger.md

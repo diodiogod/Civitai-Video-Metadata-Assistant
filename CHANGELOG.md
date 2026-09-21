@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.6.21 - 2026-09-21
+
+- Queue every video dropped directly onto Civitai and bind each file to its own media row.
+- Recover the correct media row after Civitai rerenders it while prompts and resources are being applied.
+- Ignore unrelated page dialogs when deciding whether the Civitai resource picker is open.
+
+## 0.6.20 - 2026-09-21
+
+- Prevent asynchronous resource-picker work from one queued video leaking into the next video when both contain the same resources.
+- Advance the multi-video queue immediately after the final resolved resource is added or skipped.
+
+## 0.6.19 - 2026-09-21
+
+- Fix MP4 metadata parsing dropping the first four characters of positive prompts written by FFmpeg.
+- Validate MP4 metadata parsing against a real FFmpeg-generated fixture in addition to synthetic atom tests.
+
+## 0.6.18 - 2026-09-17
+
+- Automatically open a resource card's version dropdown and select the exact Civitai model version resolved from the video's metadata before pressing Select.
+- Prefer exact version IDs and require exact version-name matches so older versions are not confused with similarly named newer releases.
+
+## 0.6.17 - 2026-09-16
+
+- Preserve the `icons/` and `src/` directory structure in Windows release ZIPs.
+- Make packaging fail when any icon, popup, script, or stylesheet referenced by the manifest is absent at its exact archive path.
+
+## 0.6.16 - 2026-09-16
+
+- Refine the extension icon into an original red faceted hexagon that combines a video play symbol with metadata rows while remaining distinct from Civitai's official logo.
+
+## 0.6.15 - 2026-09-16
+
+- Replace the toolbar and extension-listing artwork with a high-contrast video-and-metadata icon designed to remain recognizable at 16–32 px.
+
+## 0.6.14 - 2026-09-16
+
+- Scope already-attached resource detection to the current video row so repeated resources are added independently to every uploaded video.
+- Add tool, extension, workflow, and other auxiliary resources before LoRAs and base checkpoints to avoid Civitai's model-compatibility filtering hiding them later.
+
 ## 0.6.13 - 2026-08-29
 
 - Add a dedicated video-and-metadata icon for browser toolbars and extension listings.

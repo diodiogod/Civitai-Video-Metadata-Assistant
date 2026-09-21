@@ -39,7 +39,9 @@
     activity: [],
     targetMediaContainer: null,
     targetMediaFileKey: '',
+    targetMediaIndex: -1,
     uploadToken: 0,
+    directDropBinding: false,
     scanningFileKey: '',
     collapsed: initialCollapsed
   };
@@ -112,6 +114,7 @@
     state.uploadFileKey = '';
     state.targetMediaContainer = null;
     state.targetMediaFileKey = '';
+    state.targetMediaIndex = -1;
     lastObservedFileKey = '';
   }
 
@@ -133,6 +136,13 @@
     }
     clearCurrentVideoState();
     state.activeQueueId = item.id;
+    if (item.alreadyUploaded && Number.isInteger(item.mediaIndex)) {
+      const key = keyForFile(item.file);
+      state.uploadFileKey = key;
+      state.targetMediaFileKey = key;
+      state.targetMediaIndex = item.mediaIndex;
+      state.targetMediaContainer = videoMediaContainers()[item.mediaIndex] || item.targetMediaContainer || null;
+    }
     item.status = 'reading';
     item.message = 'Reading metadata';
     scanFile(item.file);
@@ -141,14 +151,31 @@
   function completeActiveQueueItem(message = 'Complete') {
     const item = activeQueueItem();
     if (!item || item.status === 'complete') return;
+    const completedQueueId = item.id;
+    const completedScanToken = state.scanToken;
     item.status = 'complete';
     item.message = message;
     addActivity('success', message, item);
     render();
     if (state.autoEverything) {
-      const next = state.queue.find((candidate) => candidate.status === 'waiting');
-      window.setTimeout(() => activateQueueItem(next), 0);
+      window.setTimeout(() => {
+        if (state.activeQueueId !== completedQueueId || state.scanToken !== completedScanToken) return;
+        const next = state.queue.find((candidate) => candidate.status === 'waiting');
+        activateQueueItem(next);
+      }, 0);
     }
+  }
+
+  function asyncOperationIdentity() {
+    return {
+      scanToken: state.scanToken,
+      queueId: state.activeQueueId,
+      fileKey: state.fileKey
+    };
+  }
+
+  function asyncOperationIsCurrent(expected) {
+    return globalThis.CVMMetadata.sameAsyncOperation(expected, asyncOperationIdentity());
   }
 
   function element(tag, className = '', text = '') {
@@ -283,36 +310,70 @@
     }, watchdogMs);
   }
 
-  async function bindDirectPageDrop(file, existingContainers) {
-    const key = keyForFile(file);
-    const bindingToken = ++state.uploadToken;
-    state.uploadFileKey = key;
-    state.targetMediaContainer = null;
-    state.targetMediaFileKey = '';
-    const container = await waitForNewVideoContainer(existingContainers);
-    if (bindingToken !== state.uploadToken || state.fileKey !== key) return;
-    if (!container) {
-      state.message = 'Civitai received the video, but its new details row could not be identified.';
+  function waitForNewVideoContainers(existingContainers, expectedCount, watchdogMs = 120000) {
+    const initialCount = existingContainers.size;
+    return waitForDomCondition(() => {
+      const containers = videoMediaContainers();
+      const indexes = globalThis.CVMMetadata.directDropMediaIndexes(initialCount, expectedCount, containers.length);
+      return indexes.length ? indexes.map((index) => containers[index]) : null;
+    }, watchdogMs);
+  }
+
+  async function enqueueDirectPageDrop(files, existingContainers) {
+    const videos = [...files].filter((file) => file.type.startsWith('video/') || /\.(mp4|webm)$/i.test(file.name));
+    if (!videos.length) return;
+    state.uploadToken += 1;
+    state.directDropBinding = true;
+    const items = videos.map((file) => ({
+      id: `video-${++state.queueCounter}`,
+      file,
+      status: 'binding',
+      message: 'Waiting for Civitai upload row',
+      alreadyUploaded: true,
+      mediaIndex: -1,
+      targetMediaContainer: null
+    }));
+    state.queue.push(...items);
+    items.forEach((item) => addActivity('info', 'Civitai drop added to the queue.', item));
+    render();
+    const containers = await waitForNewVideoContainers(existingContainers, videos.length);
+    state.directDropBinding = false;
+    if (!containers) {
+      items.forEach((item) => {
+        item.status = 'error';
+        item.message = 'Civitai upload row was not found';
+      });
+      state.message = 'Civitai received the videos, but their details rows could not be identified.';
       render();
       return;
     }
-    state.targetMediaContainer = container;
-    state.targetMediaFileKey = key;
-    state.message = 'Civitai created this video’s row. Prompt and resource actions are bound to it.';
-    setQueueStatus('applying', 'Video uploaded; applying metadata');
-    addActivity('success', 'Direct Civitai upload bound to its new media row.');
-    render();
+    const allContainers = videoMediaContainers();
+    items.forEach((item, index) => {
+      item.targetMediaContainer = containers[index];
+      item.mediaIndex = allContainers.indexOf(containers[index]);
+      item.status = 'waiting';
+      item.message = 'Uploaded by Civitai; waiting';
+    });
+    addActivity('success', `${items.length} Civitai video row${items.length === 1 ? '' : 's'} bound to the queue.`, items[0]);
+    if (!state.activeQueueId) activateQueueItem(items[0]);
+    else render();
+  }
+
+  function resolveTargetMediaContainer() {
+    if (state.targetMediaFileKey !== state.fileKey) return null;
+    if (state.targetMediaContainer?.isConnected) return state.targetMediaContainer;
+    if (state.targetMediaIndex < 0) return null;
+    const replacement = videoMediaContainers()[state.targetMediaIndex] || null;
+    if (replacement) state.targetMediaContainer = replacement;
+    return replacement;
   }
 
   function currentTargetRoot() {
-    if (state.targetMediaFileKey === state.fileKey && state.targetMediaContainer?.isConnected) {
-      return state.targetMediaContainer;
-    }
-    return document;
+    return resolveTargetMediaContainer() || document;
   }
 
   function hasPromptTarget() {
-    if (state.targetMediaFileKey === state.fileKey && state.targetMediaContainer?.isConnected) return true;
+    if (resolveTargetMediaContainer()) return true;
     return visibleElements('h1, h2, h3, h4, h5, h6')
       .filter((heading) => /^prompt$/i.test(normalizeText(heading.textContent)) && !heading.closest(`#${EXTENSION_ID}`)).length <= 1;
   }
@@ -346,6 +407,7 @@
       state.uploadFileKey = handedOffFileKey;
       state.targetMediaContainer = null;
       state.targetMediaFileKey = '';
+      state.targetMediaIndex = -1;
       state.message = 'Video handed to Civitai. Waiting for its new preview row…';
       render();
       const newContainer = await waitForNewVideoContainer(existingContainers);
@@ -353,6 +415,12 @@
       if (newContainer) {
         state.targetMediaContainer = newContainer;
         state.targetMediaFileKey = handedOffFileKey;
+        state.targetMediaIndex = videoMediaContainers().indexOf(newContainer);
+        const item = activeQueueItem();
+        if (item) {
+          item.targetMediaContainer = newContainer;
+          item.mediaIndex = state.targetMediaIndex;
+        }
         state.message = 'Civitai created this video’s row. Prompt and resource actions will target it.';
         setQueueStatus('applying', 'Video uploaded; applying metadata');
         addActivity('success', 'Uploaded and bound to the correct Civitai row.');
@@ -651,7 +719,7 @@
       const resources = await Promise.all(hints.map((hint) => lookupResource(hint)));
       if (scanToken !== state.scanToken) return;
       state.parsed = parsed;
-      state.resources = resources;
+      state.resources = globalThis.CVMMetadata.orderResourcesForPicker(resources);
       scanSucceeded = true;
       state.message = state.resources.length ? 'Metadata read locally. Review the detected resources, then add them.' : 'Metadata read locally, but no resource identifiers were present.';
       setQueueStatus('ready', 'Metadata ready');
@@ -758,9 +826,11 @@
   }
 
   function resourceSectionRoot(button) {
-    let candidate = button?.parentElement || null;
+    const target = currentTargetRoot();
+    const boundary = target === document ? document.body : target;
+    const candidates = globalThis.CVMMetadata.ancestorPathWithinBoundary(button?.parentElement, boundary);
     let headingContainer = null;
-    for (let depth = 0; candidate && candidate !== document.body && depth < 14; depth += 1, candidate = candidate.parentElement) {
+    for (const candidate of candidates) {
       const hasResourcesHeading = [...candidate.querySelectorAll('h1, h2, h3, h4, h5, h6, legend')]
         .some((heading) => /^resources$/i.test(normalizeText(heading.textContent)));
       if (!hasResourcesHeading) continue;
@@ -806,6 +876,9 @@
   }
 
   function markAlreadyAttachedResources(button) {
+    // With multiple media rows, never infer attachment state from the page as
+    // a whole. Wait until this file is bound to its own Civitai media row.
+    if (videoMediaContainers().length > 1 && currentTargetRoot() === document) return [];
     const attached = attachedResourceSnapshot(button);
     const matched = [];
     for (const resource of state.resources) {
@@ -820,7 +893,7 @@
     return matched;
   }
 
-  function closeResourcePicker(root = getDialogRoot()) {
+  function closeResourcePicker(root = resourcePickerRoot() || getDialogRoot()) {
     const closeButton = visibleElements('button, [role="button"]', root).find((button) => {
       const label = normalizeText(`${button.textContent} ${button.getAttribute('aria-label') || ''} ${button.getAttribute('title') || ''}`);
       return /mantine-CloseButton-root/.test(String(button.className)) || /^(close|cancel)$/i.test(label);
@@ -833,6 +906,19 @@
   function getDialogRoot() {
     const dialogs = visibleElements('[role="dialog"], [data-radix-dialog-content], [data-overlay-container]');
     return dialogs[dialogs.length - 1] || document.body;
+  }
+
+  function resourcePickerRoot() {
+    const roots = visibleElements('[role="dialog"], [data-radix-dialog-content], [data-overlay-container]');
+    return [...roots].reverse().find((root) => {
+      const input = findSearchInput(root);
+      if (!input) return false;
+      const descriptor = normalizeText(`${input.getAttribute('placeholder') || ''} ${input.getAttribute('aria-label') || ''} ${input.getAttribute('name') || ''}`).toLowerCase();
+      const text = normalizeText(root.textContent).toLowerCase();
+      const hasSelect = visibleElements('button, [role="button"]', root)
+        .some((button) => /^select$/i.test(normalizeText(button.textContent)));
+      return /resource|model|search/.test(descriptor) && (hasSelect || /resource|model/.test(text));
+    }) || null;
   }
 
   function findSearchInput(root, excluded = new Set()) {
@@ -891,7 +977,7 @@
   }
 
   function pickerIsOpen() {
-    return visibleElements('[role="dialog"], [data-radix-dialog-content], [data-overlay-container]').length > 0;
+    return Boolean(resourcePickerRoot());
   }
 
   function pickerHasNoResults(root) {
@@ -922,10 +1008,10 @@
 
       function check(mutations = []) {
         if (settled || !armed || fieldText(picker.input) !== normalizeText(search.query)) return;
-        const root = getDialogRoot();
+        const root = picker.root?.isConnected && visible(picker.root) ? picker.root : resourcePickerRoot();
         if (!root || !root.isConnected || !visible(root)) return finish({ type: 'closed' });
-        const exactButton = exactResourceSelectButton(root, resource);
-        if (exactButton) return finish({ type: 'match', exactButton });
+        const card = resourceCardFor(root, resource);
+        if (card) return finish({ type: 'match', card });
         if (initialNoResults && !sawNoResultsClear) {
           sawNoResultsClear = mutations.some((mutation) => [...mutation.removedNodes]
             .some((node) => /no results|no models found|nothing found|no resources found/i.test(normalizeText(node.textContent))));
@@ -968,7 +1054,8 @@
     const existingInputs = new Set(document.querySelectorAll('input:not([type="file"]), textarea'));
     button.click();
     const picker = await waitForDomCondition(() => {
-      const root = getDialogRoot();
+      const root = resourcePickerRoot();
+      if (!root) return null;
       const input = findSearchInput(root, existingInputs);
       return input ? { root, input } : null;
     });
@@ -978,7 +1065,8 @@
     dispatchInput(input, search.query || modelName);
     const nameParts = [modelName, version].filter(Boolean).map((part) => normalizeText(part).toLowerCase());
     const searchResult = await waitForDomCondition(() => {
-      const root = getDialogRoot();
+      const root = resourcePickerRoot();
+      if (!root) return { type: 'closed' };
       const candidate = matchingResourceCandidate(root, nameParts);
       if (candidate) return { type: 'candidate', candidate };
       if (pickerHasNoResults(root)) return { type: 'empty' };
@@ -988,7 +1076,8 @@
     const candidate = searchResult.candidate;
     clickResourceCandidate(candidate);
     const actionResult = await waitForDomCondition(() => {
-      const addButton = pickerActionButton(getDialogRoot());
+      const root = resourcePickerRoot();
+      const addButton = root ? pickerActionButton(root) : null;
       if (addButton) return { type: 'button', addButton };
       if (!pickerIsOpen()) return { type: 'closed' };
       return null;
@@ -1002,40 +1091,107 @@
     return { ok: true };
   }
 
-  function exactResourceSelectButton(root, resource) {
+  function resourceCardFor(root, resource) {
     const versionId = resource.lookup?.id || resource.modelVersionId;
-    if (!versionId) return null;
-    const link = [...root.querySelectorAll('a[href]')]
-      .find((element) => new URL(element.href, location.href).searchParams.get('modelVersionId') === String(versionId));
-    if (link) {
-      let card = link.parentElement;
-      for (let depth = 0; card && card !== root && depth < 7; depth += 1, card = card.parentElement) {
-        const select = visibleElements('button, [role="button"]', card)
-          .find((button) => /^select$/i.test(normalizeText(button.textContent)));
-        if (select) return select;
-      }
-    }
-
+    const modelId = resource.lookup?.modelId || resource.modelId;
     const modelName = normalizeText(resource.lookup?.model?.name || resource.modelName || resource.name).toLowerCase();
-    const versionName = normalizeText(resource.lookup?.name || resource.versionName).toLowerCase();
-    if (!modelName || !versionName) return null;
     for (const select of visibleElements('button, [role="button"]', root).filter((button) => /^select$/i.test(normalizeText(button.textContent)))) {
       let card = select.parentElement;
-      for (let depth = 0; card && card !== root && depth < 6; depth += 1, card = card.parentElement) {
+      for (let depth = 0; card && card !== root && depth < 8; depth += 1, card = card.parentElement) {
         const text = normalizeText(card.textContent).toLowerCase();
-        const versions = [...card.querySelectorAll('input, textarea')].map((field) => normalizeText(field.value).toLowerCase());
-        if (text.includes(modelName) && versions.includes(versionName)) return select;
-        if (card.querySelectorAll('button, [role="button"]').length > 8) break;
+        const links = [...card.querySelectorAll('a[href]')];
+        const hasVersion = versionId && links.some((link) => {
+          const url = new URL(link.href, location.href);
+          return url.searchParams.get('modelVersionId') === String(versionId) || /\/model-versions\/(\d+)/i.test(url.pathname) && url.pathname.match(/\/model-versions\/(\d+)/i)?.[1] === String(versionId);
+        });
+        const hasModel = modelId && links.some((link) => {
+          const url = new URL(link.href, location.href);
+          return url.pathname.match(/\/models\/(\d+)/i)?.[1] === String(modelId);
+        });
+        const hasVersionControl = versionControlForCard(card) !== null;
+        if ((hasVersion || hasModel || (modelName && text.includes(modelName))) && hasVersionControl) return { card, select };
+        if (card.querySelectorAll('button, [role="button"] select').length > 12) break;
       }
     }
     return null;
   }
 
+  function versionControlForCard(card) {
+    const controls = visibleElements(
+      '[role="combobox"], input[aria-haspopup="listbox"], button[aria-haspopup="listbox"], input:not([type="hidden"]):not([type="file"]), select',
+      card
+    ).filter((element) => {
+      if (element.matches('button, [role="button"]') && /^select$/i.test(normalizeText(element.textContent))) return false;
+      const descriptor = normalizeText(`${element.getAttribute('aria-label') || ''} ${element.getAttribute('placeholder') || ''} ${element.getAttribute('name') || ''}`);
+      return !/search/i.test(descriptor);
+    });
+    return controls.sort((left, right) => {
+      const score = (element) => (element.getAttribute('role') === 'combobox' ? 40 : 0)
+        + (element.getAttribute('aria-haspopup') === 'listbox' ? 30 : 0)
+        + (/version/i.test(`${element.getAttribute('aria-label') || ''} ${element.getAttribute('name') || ''}`) ? 20 : 0)
+        + (fieldText(element) ? 5 : 0);
+      return score(right) - score(left);
+    })[0] || null;
+  }
+
+  function versionDescriptor(element) {
+    return {
+      text: fieldText(element) || normalizeText(element.textContent),
+      value: element.getAttribute('data-value') || element.value || '',
+      versionId: element.getAttribute('data-version-id') || element.getAttribute('data-model-version-id') || '',
+      href: element.getAttribute('href') || element.closest('a[href]')?.getAttribute('href') || ''
+    };
+  }
+
+  function selectedVersionMatches(card, resource) {
+    const versionId = String(resource.lookup?.id || resource.modelVersionId || '');
+    if (versionId) {
+      const exactLink = [...card.querySelectorAll('a[href]')].some((link) => {
+        const url = new URL(link.href, location.href);
+        return url.searchParams.get('modelVersionId') === versionId || url.pathname.match(/\/model-versions\/(\d+)/i)?.[1] === versionId;
+      });
+      if (exactLink) return true;
+    }
+    const control = versionControlForCard(card);
+    return Boolean(control && globalThis.CVMMetadata.scoreResourceVersionOption(resource, versionDescriptor(control)) > 0);
+  }
+
+  function exactVersionOption(resource) {
+    return visibleElements('[role="option"], [data-combobox-option], [data-option-value]')
+      .map((element) => ({
+        element,
+        score: globalThis.CVMMetadata.scoreResourceVersionOption(resource, versionDescriptor(element))
+      }))
+      .filter(({ score }) => score > 0)
+      .sort((left, right) => right.score - left.score)[0]?.element || null;
+  }
+
+  async function exactResourceSelectButton(root, resource, operationIsCurrent = () => true) {
+    if (!operationIsCurrent()) return null;
+    let match = resourceCardFor(root, resource);
+    if (!match) return null;
+    if (selectedVersionMatches(match.card, resource)) return match.select;
+    const control = versionControlForCard(match.card);
+    if (!control) return null;
+    control.click();
+    const option = await waitForDomCondition(() => exactVersionOption(resource), 10000);
+    if (!option || !operationIsCurrent()) return null;
+    option.click();
+    const verified = await waitForDomCondition(() => {
+      if (!operationIsCurrent()) return null;
+      match = resourceCardFor(root, resource);
+      return match && selectedVersionMatches(match.card, resource) ? match.select : null;
+    }, 10000);
+    return verified || null;
+  }
+
   async function watchGuidedPicker(dialog, resource, autoSelect) {
     const id = resourceId(resource);
+    const operation = asyncOperationIdentity();
+    const isCurrent = () => asyncOperationIsCurrent(operation) && state.guidedResourceId === id;
     if (autoSelect) {
-      const exactButton = await waitForDomCondition(() => exactResourceSelectButton(dialog, resource), 30000);
-      if (state.guidedResourceId !== id) return;
+      const exactButton = await exactResourceSelectButton(dialog, resource, isCurrent);
+      if (!isCurrent()) return;
       if (exactButton) {
         state.guidedSelectionPending = true;
         exactButton.click();
@@ -1045,8 +1201,11 @@
         render();
       }
     }
-    const closed = await waitForDomCondition(() => !dialog.isConnected || !visible(dialog), 120000);
-    if (!closed || state.guidedResourceId !== id) return;
+    const pickerResult = await waitForDomCondition(() => {
+      if (!isCurrent()) return { stale: true };
+      return !dialog.isConnected || !visible(dialog) ? { closed: true } : null;
+    }, 120000);
+    if (!pickerResult?.closed || !isCurrent()) return;
     if (state.guidedSelectionPending) state.added.add(id);
     else state.skipped.add(id);
     const wasAdded = state.guidedSelectionPending;
@@ -1056,11 +1215,28 @@
     addActivity(wasAdded ? 'success' : 'warning', `${resourceName(resource)} was ${wasAdded ? 'added' : 'skipped'}.`);
     setQueueStatus('applying', `Resources: ${state.added.size} added, ${state.skipped.size} skipped`);
     render();
+    if (finishResourcePassIfComplete()) return;
     if (state.resourceAutomationActive || state.autoAdvanceResources) {
       await waitForDomQuiet(document.documentElement, 450, 5000);
+      if (!asyncOperationIsCurrent(operation)) return;
       if (state.resourceAutomationActive) addResources({ autoSelect: true });
       else addResources();
     }
+  }
+
+  function finishResourcePassIfComplete() {
+    const remaining = state.resources.some((resource) => resource.lookup
+      && !state.added.has(resourceId(resource))
+      && !state.skipped.has(resourceId(resource)));
+    if (remaining) return false;
+    state.resourceAutomationActive = false;
+    const unresolved = state.resources.filter((resource) => !resource.lookup).length;
+    state.message = unresolved
+      ? `All resolved resources are complete. ${unresolved} unresolved resource${unresolved === 1 ? ' was' : 's were'} skipped.`
+      : 'All detected resources are complete.';
+    if (state.promptFilled) completeActiveQueueItem(state.message);
+    render();
+    return true;
   }
 
   async function addResources({ autoSelect = false } = {}) {
@@ -1086,13 +1262,7 @@
     const remaining = state.resources.filter((resource) => resource.lookup && !state.added.has(resourceId(resource)) && !state.skipped.has(resourceId(resource)));
     const resource = remaining[0];
     if (!resource) {
-      state.resourceAutomationActive = false;
-      const unresolved = state.resources.filter((item) => !item.lookup).length;
-      state.message = unresolved
-        ? `All resolved resources are complete. ${unresolved} unresolved resource${unresolved === 1 ? ' was' : 's were'} skipped.`
-        : 'All detected resources are complete.';
-      if (state.promptFilled) completeActiveQueueItem(state.message);
-      render();
+      finishResourcePassIfComplete();
       return;
     }
     state.busy = true;
@@ -1108,7 +1278,8 @@
     const existingInputs = new Set(document.querySelectorAll('input:not([type="file"]), textarea'));
     button.click();
     const picker = await waitForDomCondition(() => {
-      const root = getDialogRoot();
+      const root = resourcePickerRoot();
+      if (!root) return null;
       const input = findSearchInput(root, existingInputs);
       return input ? { root, input } : null;
     });
@@ -1500,7 +1671,7 @@
     const queueId = state.activeQueueId;
     if (scanToken !== state.scanToken || !state.autoEverything) return;
     if (state.uploadFileKey === state.fileKey) {
-      await waitForDomCondition(() => state.targetMediaFileKey === state.fileKey && state.targetMediaContainer?.isConnected, 120000);
+      await waitForDomCondition(() => resolveTargetMediaContainer(), 120000);
     } else {
       await useFileInCivitaiUpload();
     }
@@ -1514,6 +1685,7 @@
 
   let lastObservedFileKey = '';
   function detectFileChanges() {
+    if (state.directDropBinding) return;
     const file = getFileFromPage();
     const key = file ? `${file.name}:${file.size}:${file.lastModified}` : '';
     if (key && key === state.ignoredPageFileKey) return;
@@ -1547,12 +1719,11 @@
     document.addEventListener('change', detectFileChanges, true);
     document.addEventListener('drop', (event) => {
       if (event.target?.closest?.(`#${EXTENSION_ID}`)) return;
-      const file = [...(event.dataTransfer?.files || [])].find((candidate) => candidate.type.startsWith('video/') || /\.(mp4|webm)$/i.test(candidate.name));
-      if (file) {
+      const files = [...(event.dataTransfer?.files || [])].filter((candidate) => candidate.type.startsWith('video/') || /\.(mp4|webm)$/i.test(candidate.name));
+      if (files.length) {
         const existingContainers = new Set(videoMediaContainers());
         lastObservedFileKey = '';
-        scanFile(file);
-        bindDirectPageDrop(file, existingContainers);
+        enqueueDirectPageDrop(files, existingContainers);
       }
     }, true);
     document.addEventListener('click', (event) => {

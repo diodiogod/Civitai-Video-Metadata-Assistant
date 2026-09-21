@@ -134,9 +134,14 @@
 
   function readMp4DataValue(bytes, dataBox) {
     const start = dataBox.dataStart;
-    if (start + 12 > dataBox.end) return null;
-    const dataType = uint32(bytes, start + 4);
-    const valueStart = start + 12;
+    // An ISO/QuickTime metadata `data` box begins with a 32-bit
+    // type/flags word followed by a 32-bit locale. The UTF-8 payload starts
+    // immediately after those 8 bytes. FFmpeg writes mdta values this way.
+    if (start + 8 > dataBox.end) return null;
+    const typeAndFlags = uint32(bytes, start);
+    if (typeAndFlags === null) return null;
+    const dataType = typeAndFlags & 0x00ffffff;
+    const valueStart = start + 8;
     if (valueStart >= dataBox.end || dataBox.end - valueStart > MAX_VALUE_BYTES) return null;
     if (dataType === 1 || dataType === 0) return utf8(bytes, valueStart, dataBox.end);
     return null;
@@ -591,6 +596,61 @@
     }).map(({ query, method }) => ({ query: query.trim(), method }));
   }
 
+  function orderResourcesForPicker(resources) {
+    const priority = (resource) => {
+      const type = [
+        resource?.type,
+        resource?.lookup?.model?.type,
+        resource?.lookup?.type
+      ].filter(Boolean).join(' ').toLowerCase();
+      if (/tool|extension|workflow|other/.test(type)) return 0;
+      if (/checkpoint|base\s*model|^model$/.test(type)) return 2;
+      return 1;
+    };
+    return [...(resources || [])]
+      .map((resource, index) => ({ resource, index, priority: priority(resource) }))
+      .sort((left, right) => left.priority - right.priority || left.index - right.index)
+      .map(({ resource }) => resource);
+  }
+
+  function ancestorPathWithinBoundary(start, boundary, maxDepth = 14) {
+    const path = [];
+    let current = start || null;
+    for (let depth = 0; current && depth < maxDepth; depth += 1) {
+      path.push(current);
+      if (!boundary || current === boundary) break;
+      current = current.parentElement || null;
+    }
+    if (boundary && path[path.length - 1] !== boundary) return [];
+    return path;
+  }
+
+  function scoreResourceVersionOption(resource, option = {}) {
+    const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const targetId = normalize(resource?.lookup?.id || resource?.modelVersionId);
+    const targetName = normalize(resource?.lookup?.name || resource?.versionName);
+    const optionId = normalize(option.versionId || option.value || option.id);
+    const text = normalize(option.text);
+    const href = String(option.href || '');
+    const hrefVersion = normalize(href.match(/[?&]modelVersionId=(\d+)/i)?.[1] || href.match(/\/model-versions\/(\d+)/i)?.[1]);
+    if (targetId && (optionId === targetId || hrefVersion === targetId)) return 100;
+    if (targetName && text === targetName) return 80;
+    if (targetName && text.endsWith(` ${targetName}`)) return 60;
+    return 0;
+  }
+
+  function sameAsyncOperation(expected = {}, current = {}) {
+    return expected.scanToken === current.scanToken
+      && expected.queueId === current.queueId
+      && expected.fileKey === current.fileKey;
+  }
+
+  function directDropMediaIndexes(existingCount, droppedCount, currentCount) {
+    if (!Number.isInteger(existingCount) || !Number.isInteger(droppedCount) || !Number.isInteger(currentCount)
+      || existingCount < 0 || droppedCount < 1 || currentCount < existingCount + droppedCount) return [];
+    return Array.from({ length: droppedCount }, (_, index) => currentCount - droppedCount + index);
+  }
+
   function resourceIsAlreadyAttached(resource, attached = {}) {
     const asId = (value) => {
       const id = Number(value);
@@ -620,6 +680,11 @@
     getGenerationFields,
     getResourceSearchQuery,
     getResourceSearchQueries,
+    orderResourcesForPicker,
+    ancestorPathWithinBoundary,
+    scoreResourceVersionOption,
+    sameAsyncOperation,
+    directDropMediaIndexes,
     resourceIsAlreadyAttached,
     detectContainer,
     constants: { MAX_FILE_BYTES, MAX_METADATA_BYTES, MAX_VALUE_BYTES, MAX_ELEMENTS }
