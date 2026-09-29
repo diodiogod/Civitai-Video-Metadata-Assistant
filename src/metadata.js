@@ -654,8 +654,11 @@
   function uploadRouteKey(pathname, search = '') {
     const path = String(pathname || '').replace(/\/$/, '');
     if (/^\/posts\/(?:create|\d+\/edit)$/.test(path)) return path;
-    if (/^\/models\/\d+\/model-versions\/\d+\/wizard$/.test(path)
-      && new URLSearchParams(search).get('step') === '3') return `${path}?step=3`;
+    const wizardStep = /^\/models\/\d+\/wizard$/.test(path) ? '4'
+      : /^\/models\/\d+\/model-versions\/\d+\/wizard$/.test(path) ? '3' : '';
+    if (wizardStep && new URLSearchParams(search).get('step') === wizardStep) {
+      return `${path}?step=${wizardStep}`;
+    }
     return '';
   }
 

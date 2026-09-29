@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.23 - 2026-09-29
+
+- Show the assistant on step 4 of Civitai's new-model wizard, where example videos are uploaded.
+- Keep support for step 3 of the separate model-version wizard.
+
 ## 0.6.22 - 2026-09-29
 
 - Show the assistant on step 3 of Civitai's model-version upload wizard, where example videos are added to the post.
