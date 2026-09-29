@@ -1685,6 +1685,7 @@
 
   let lastObservedFileKey = '';
   function detectFileChanges() {
+    if (!globalThis.CVMMetadata.uploadRouteKey(location.pathname, location.search)) return;
     if (state.directDropBinding) return;
     const file = getFileFromPage();
     const key = file ? `${file.name}:${file.size}:${file.lastModified}` : '';
@@ -1697,8 +1698,8 @@
   }
 
   function init() {
-    const isUploadRoute = () => /^\/posts\/(?:create|\d+\/edit)\/?$/.test(location.pathname);
-    const uploadRouteKey = () => isUploadRoute() ? location.pathname.replace(/\/$/, '') : '';
+    const uploadRouteKey = () => globalThis.CVMMetadata.uploadRouteKey(location.pathname, location.search);
+    const isUploadRoute = () => Boolean(uploadRouteKey());
     let previousUploadRouteKey = uploadRouteKey();
     const syncPanel = () => {
       const currentUploadRouteKey = uploadRouteKey();
@@ -1716,8 +1717,10 @@
       syncPanel();
       if (isUploadRoute()) detectFileChanges();
     }).observe(document.documentElement, { childList: true, subtree: true });
+    window.addEventListener('popstate', syncPanel);
     document.addEventListener('change', detectFileChanges, true);
     document.addEventListener('drop', (event) => {
+      if (!isUploadRoute()) return;
       if (event.target?.closest?.(`#${EXTENSION_ID}`)) return;
       const files = [...(event.dataTransfer?.files || [])].filter((candidate) => candidate.type.startsWith('video/') || /\.(mp4|webm)$/i.test(candidate.name));
       if (files.length) {

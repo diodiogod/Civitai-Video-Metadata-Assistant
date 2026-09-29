@@ -651,6 +651,14 @@
     return Array.from({ length: droppedCount }, (_, index) => currentCount - droppedCount + index);
   }
 
+  function uploadRouteKey(pathname, search = '') {
+    const path = String(pathname || '').replace(/\/$/, '');
+    if (/^\/posts\/(?:create|\d+\/edit)$/.test(path)) return path;
+    if (/^\/models\/\d+\/model-versions\/\d+\/wizard$/.test(path)
+      && new URLSearchParams(search).get('step') === '3') return `${path}?step=3`;
+    return '';
+  }
+
   function resourceIsAlreadyAttached(resource, attached = {}) {
     const asId = (value) => {
       const id = Number(value);
@@ -685,6 +693,7 @@
     scoreResourceVersionOption,
     sameAsyncOperation,
     directDropMediaIndexes,
+    uploadRouteKey,
     resourceIsAlreadyAttached,
     detectContainer,
     constants: { MAX_FILE_BYTES, MAX_METADATA_BYTES, MAX_VALUE_BYTES, MAX_ELEMENTS }

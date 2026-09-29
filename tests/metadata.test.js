@@ -298,3 +298,14 @@ test('maps every simultaneous direct-drop video to its own appended Civitai row'
   assert.deepEqual(metadata.directDropMediaIndexes(2, 2, 4), [2, 3]);
   assert.deepEqual(metadata.directDropMediaIndexes(2, 2, 3), []);
 });
+
+test('shows the assistant only on post editors and model wizard post creation', () => {
+  assert.equal(metadata.uploadRouteKey('/posts/create', ''), '/posts/create');
+  assert.equal(metadata.uploadRouteKey('/posts/123/edit/', '?video=true'), '/posts/123/edit');
+  const wizard = '/models/2898818/model-versions/3367783/wizard';
+  assert.equal(metadata.uploadRouteKey(wizard, '?step=3'), `${wizard}?step=3`);
+  assert.equal(metadata.uploadRouteKey(`${wizard}/`, '?foo=1&step=3'), `${wizard}?step=3`);
+  assert.equal(metadata.uploadRouteKey(wizard, '?step=1'), '');
+  assert.equal(metadata.uploadRouteKey(wizard, '?step=2'), '');
+  assert.equal(metadata.uploadRouteKey('/models/2898818', '?step=3'), '');
+});

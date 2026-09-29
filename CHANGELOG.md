@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.22 - 2026-09-29
+
+- Show the assistant on step 3 of Civitai's model-version upload wizard, where example videos are added to the post.
+- Keep the assistant hidden on the wizard's model-description and file-upload steps.
+
 ## 0.6.21 - 2026-09-21
 
 - Queue every video dropped directly onto Civitai and bind each file to its own media row.

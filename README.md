@@ -70,7 +70,9 @@ Disable **Do everything automatically** to use the individual controls:
 - **Copy prompt** and **Copy metadata** are fallbacks for manual recovery or diagnostics.
 - **Start next video** skips the unfinished active item and activates the next queued item.
 
-The **Activity & issues** section records completed steps, skipped resources, unresolved metadata, and recoverable errors. The extension clears its queue when you leave the Civitai create/edit workflow; it never deletes uploaded Civitai media.
+The **Activity & issues** section records completed steps, skipped resources, unresolved metadata, and recoverable errors. The extension clears its queue when you leave the Civitai post upload workflow; it never deletes uploaded Civitai media.
+
+The assistant also appears on step 3 (**Create a post**) of the model-version upload wizard, where Civitai accepts example videos. It stays hidden on steps 1 and 2.
 
 Use the **−** button in the panel header to collapse the assistant when it covers the upload UI. The compact header stays available at the bottom-right so you can expand it again; the preference is remembered for future Civitai upload pages.
 
@@ -107,7 +109,7 @@ When present, the assistant fills Civitai's positive prompt, negative prompt, st
 
 ## Troubleshooting
 
-- **Panel not visible:** confirm that you are on a Civitai create or post-edit page, reload the extension, and reload Civitai.
+- **Panel not visible:** confirm that you are on a Civitai create or post-edit page, or step 3 of a model-version wizard. Reload the extension and Civitai page.
 - **Wrong video row:** upload through the extension so it can observe and bind the newly created Civitai row.
 - **Resource picker pauses:** choose the correct result manually or close the picker to skip it. The queue will continue.
 - **Metadata missing:** verify that the source video contains supported MP4/WebM tags. **Copy metadata** can help inspect what was detected.
