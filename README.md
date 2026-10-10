@@ -21,9 +21,15 @@ The extension can upload videos into Civitai's existing form, fill positive and 
 
 ## Installation
 
-Download the latest ZIP from [Releases](https://github.com/diodiogod/Civitai-Video-Metadata-Assistant/releases) and extract it to a permanent folder before loading it in the browser.
+### Firefox
 
-### Edge
+Install [Civitai Video Metadata Assist from Firefox Add-ons](https://addons.mozilla.org/en-US/firefox/addon/civitai-video-metadata-assist/), then open or reload a supported Civitai upload page.
+
+### Chrome and Edge (unpacked)
+
+Download the latest ZIP from [GitHub Releases](https://github.com/diodiogod/Civitai-Video-Metadata-Assistant/releases) and extract it to a permanent folder before loading it in the browser.
+
+#### Edge
 
 1. Open `edge://extensions`.
 2. Enable **Developer mode**.
@@ -31,23 +37,13 @@ Download the latest ZIP from [Releases](https://github.com/diodiogod/Civitai-Vid
 4. Select the extracted extension folder containing `manifest.json`.
 5. Open or reload Civitai's Create Image/Create Video page.
 
-### Chrome
+#### Chrome
 
 1. Open `chrome://extensions`.
 2. Enable **Developer mode**.
 3. Select **Load unpacked**.
 4. Select the extracted extension folder containing `manifest.json`.
 5. Open or reload Civitai's Create Image/Create Video page.
-
-### Firefox (temporary installation)
-
-1. Open `about:debugging`.
-2. Select **This Firefox**.
-3. Select **Load Temporary Add-on…**.
-4. Select `manifest.json` from the extracted extension folder.
-5. Open or reload Civitai's Create Image/Create Video page.
-
-Firefox removes temporary add-ons after the browser restarts. A signed Firefox package is not published yet.
 
 ## Usage
 
@@ -104,7 +100,6 @@ When present, the assistant fills Civitai's positive prompt, negative prompt, st
 
 - Civitai is a frequently changing React application. UI changes can temporarily break prompt/resource automation.
 - Automatic resource selection requires an exact Civitai identity. Unresolved or ambiguous resources require review.
-- Firefox installation is temporary until a signed package is published.
 - The current parser supports MP4 and WebM video metadata, not arbitrary image metadata.
 
 ## Troubleshooting
@@ -113,7 +108,7 @@ When present, the assistant fills Civitai's positive prompt, negative prompt, st
 - **Wrong video row:** upload through the extension so it can observe and bind the newly created Civitai row.
 - **Resource picker pauses:** choose the correct result manually or close the picker to skip it. The queue will continue.
 - **Metadata missing:** verify that the source video contains supported MP4/WebM tags. **Copy metadata** can help inspect what was detected.
-- **After updating:** reload the unpacked extension from the browser's extension page, then reload Civitai.
+- **After updating an unpacked Chrome or Edge install:** reload the extension from the browser's extension page, then reload Civitai.
 
 ## Development
 
