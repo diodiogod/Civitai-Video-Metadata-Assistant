@@ -787,29 +787,6 @@
     });
   }
 
-  function waitForDomQuiet(root = document.documentElement, quietMs = 450, watchdogMs = 5000) {
-    return new Promise((resolve) => {
-      let quietTimer = null;
-      let settled = false;
-      const observer = new MutationObserver(schedule);
-      const watchdog = window.setTimeout(() => finish(), watchdogMs);
-      function finish() {
-        if (settled) return;
-        settled = true;
-        observer.disconnect();
-        window.clearTimeout(watchdog);
-        if (quietTimer) window.clearTimeout(quietTimer);
-        resolve();
-      }
-      function schedule() {
-        if (quietTimer) window.clearTimeout(quietTimer);
-        quietTimer = window.setTimeout(finish, quietMs);
-      }
-      observer.observe(root, { childList: true, subtree: true, attributes: true, characterData: true });
-      schedule();
-    });
-  }
-
   function findResourceButton(root = currentTargetRoot()) {
     const candidates = visibleElements('button, [role="button"]', root).filter((element) => {
       if (element.closest(`#${EXTENSION_ID}`)) return false;
@@ -985,16 +962,33 @@
     return /no results|no models found|nothing found|no resources found/i.test(text);
   }
 
+  const PICKER_LOADING_SELECTOR = '.mantine-Loader-root, .mantine-LoadingOverlay-loader, .mantine-Skeleton-root, [role="progressbar"], [aria-busy="true"], [data-loading]:not([data-loading="false"])';
+
+  function pickerIsLoading(root) {
+    if (!root) return false;
+    const results = root.querySelector('#resource-select-modal') || root;
+    return results.matches?.('[aria-busy="true"]') || visibleElements(PICKER_LOADING_SELECTOR, results).length > 0;
+  }
+
+  function pickerMutationContains(root, mutations, selector) {
+    return mutations.some((mutation) => root.contains(mutation.target)
+      && [...mutation.addedNodes].some((node) => node.matches?.(selector) || node.querySelector?.(selector)));
+  }
+
   function fieldText(field) {
     return normalizeText(field?.isContentEditable ? field.textContent : field?.value);
   }
 
-  function searchPickerOnce(picker, resource, search, watchdogMs = 30000) {
+  function searchPickerOnce(picker, resource, search, watchdogMs = 90000) {
     return new Promise((resolve) => {
+      const operation = asyncOperationIdentity();
       let settled = false;
       let armed = false;
       const initialNoResults = pickerHasNoResults(picker.root);
+      const sameQuery = fieldText(picker.input) === normalizeText(search.query);
       let sawNoResultsClear = !initialNoResults;
+      let sawLoading = false;
+      let confirmationTimer = null;
       const observer = new MutationObserver(check);
       const watchdog = window.setTimeout(() => finish({ type: 'pending' }), watchdogMs);
 
@@ -1003,33 +997,57 @@
         settled = true;
         observer.disconnect();
         window.clearTimeout(watchdog);
+        window.clearTimeout(confirmationTimer);
         resolve(value);
       }
 
       function check(mutations = []) {
-        if (settled || !armed || fieldText(picker.input) !== normalizeText(search.query)) return;
+        if (settled || !armed) return;
+        if (!asyncOperationIsCurrent(operation)) return finish({ type: 'stale' });
         const root = picker.root?.isConnected && visible(picker.root) ? picker.root : resourcePickerRoot();
         if (!root || !root.isConnected || !visible(root)) return finish({ type: 'closed' });
+        picker.root = root;
+        if (!picker.input.isConnected) picker.input = findSearchInput(root);
+        if (fieldText(picker.input) !== normalizeText(search.query)) return finish({ type: 'interrupted' });
+        const loading = pickerIsLoading(root);
+        sawLoading ||= loading || pickerMutationContains(root, mutations, PICKER_LOADING_SELECTOR);
+        if (loading) {
+          window.clearTimeout(confirmationTimer);
+          confirmationTimer = null;
+          return;
+        }
         const card = resourceCardFor(root, resource);
         if (card) return finish({ type: 'match', card });
-        if (initialNoResults && !sawNoResultsClear) {
-          sawNoResultsClear = mutations.some((mutation) => [...mutation.removedNodes]
-            .some((node) => /no results|no models found|nothing found|no resources found/i.test(normalizeText(node.textContent))));
-        }
         const noResults = pickerHasNoResults(root);
-        if (!noResults) sawNoResultsClear = true;
-        // An initial empty picker can already say "no results" before a query is entered.
-        // Only accept that state after this query has produced a DOM transition.
-        if (noResults && sawNoResultsClear) finish({ type: 'empty' });
+        if (!noResults) {
+          sawNoResultsClear = true;
+          window.clearTimeout(confirmationTimer);
+          confirmationTimer = null;
+          return;
+        }
+        // Civitai debounces its search input and can retain an older empty state
+        // while fetching. Only confirm an idle response, never a running query.
+        if ((sawLoading || sawNoResultsClear || sameQuery) && !confirmationTimer) {
+          confirmationTimer = window.setTimeout(() => {
+            confirmationTimer = null;
+            if (!asyncOperationIsCurrent(operation)) return finish({ type: 'stale' });
+            if (!visible(picker.root)) return finish({ type: 'closed' });
+            if (fieldText(picker.input) !== normalizeText(search.query)) return finish({ type: 'interrupted' });
+            if (!pickerIsLoading(picker.root) && pickerHasNoResults(picker.root)
+              && !resourceCardFor(picker.root, resource)) finish({ type: 'empty' });
+          }, 750);
+        }
       }
 
       observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, characterData: true });
       dispatchInput(picker.input, search.query);
       armed = fieldText(picker.input) === normalizeText(search.query);
+      check();
     });
   }
 
   async function searchPickerWithFallbacks(picker, resource) {
+    const operation = asyncOperationIdentity();
     const searches = resourceSearches(resource);
     for (let index = 0; index < searches.length; index += 1) {
       const search = searches[index];
@@ -1038,6 +1056,7 @@
         : `Searching by ${search.method} for ${resourceName(resource)}…`;
       render();
       const result = await searchPickerOnce(picker, resource, search);
+      if (!asyncOperationIsCurrent(operation)) return { search, result: { type: 'stale' } };
       if (result.type !== 'empty') return { search, result };
       addActivity('warning', `No result for ${resourceName(resource)} using ${search.method}.`);
     }
@@ -1174,15 +1193,21 @@
     const control = versionControlForCard(match.card);
     if (!control) return null;
     control.click();
-    const option = await waitForDomCondition(() => exactVersionOption(resource), 10000);
-    if (!option || !operationIsCurrent()) return null;
-    option.click();
+    const selection = await waitForDomCondition(() => {
+      if (!operationIsCurrent()) return { stale: true };
+      const option = exactVersionOption(resource);
+      return option ? { option } : null;
+    }, 30000);
+    if (!selection?.option || !operationIsCurrent()) return null;
+    selection.option.click();
     const verified = await waitForDomCondition(() => {
-      if (!operationIsCurrent()) return null;
+      if (!operationIsCurrent()) return { stale: true };
+      if (!root?.isConnected) root = resourcePickerRoot();
+      if (!root || pickerIsLoading(root)) return null;
       match = resourceCardFor(root, resource);
-      return match && selectedVersionMatches(match.card, resource) ? match.select : null;
-    }, 10000);
-    return verified || null;
+      return match && selectedVersionMatches(match.card, resource) ? { select: match.select } : null;
+    }, 30000);
+    return verified?.select || null;
   }
 
   async function watchGuidedPicker(dialog, resource, autoSelect) {
@@ -1190,15 +1215,24 @@
     const operation = asyncOperationIdentity();
     const isCurrent = () => asyncOperationIsCurrent(operation) && state.guidedResourceId === id;
     if (autoSelect) {
-      const exactButton = await exactResourceSelectButton(dialog, resource, isCurrent);
+      const ready = await waitForDomCondition(() => {
+        if (!isCurrent()) return { stale: true };
+        const currentDialog = dialog.isConnected && visible(dialog) ? dialog : resourcePickerRoot();
+        if (!currentDialog) return { closed: true };
+        dialog = currentDialog;
+        return !pickerIsLoading(dialog) && resourceCardFor(dialog, resource) ? { ready: true } : null;
+      }, 120000);
       if (!isCurrent()) return;
-      if (exactButton) {
-        state.guidedSelectionPending = true;
-        exactButton.click();
-      } else {
-        state.resourceAutomationActive = false;
-        state.message = `No exact Civitai version match appeared for ${resourceName(resource)}. Select manually or close the picker to skip it.`;
-        render();
+      if (!ready?.closed) {
+        const exactButton = ready?.ready ? await exactResourceSelectButton(dialog, resource, isCurrent) : null;
+        if (!isCurrent()) return;
+        if (exactButton) {
+          state.guidedSelectionPending = true;
+          exactButton.click();
+        } else {
+          state.message = `Select the exact version of ${resourceName(resource)} manually or close the picker to skip it. Automatic processing will continue afterward.`;
+          render();
+        }
       }
     }
     const pickerResult = await waitForDomCondition(() => {
@@ -1217,8 +1251,19 @@
     render();
     if (finishResourcePassIfComplete()) return;
     if (state.resourceAutomationActive || state.autoAdvanceResources) {
-      await waitForDomQuiet(document.documentElement, 450, 5000);
+      const ready = await waitForDomCondition(() => {
+        if (!asyncOperationIsCurrent(operation)) return { stale: true };
+        if (pickerIsOpen()) return null;
+        const button = findResourceButton();
+        if (!button || button.disabled || button.getAttribute('aria-disabled') === 'true') return null;
+        return !pickerIsLoading(resourceSectionRoot(button)) ? { ready: true } : null;
+      }, 90000);
       if (!asyncOperationIsCurrent(operation)) return;
+      if (!ready?.ready) {
+        state.message = 'Civitai has not finished updating its resource controls. Use Find next resource when they are ready.';
+        render();
+        return;
+      }
       if (state.resourceAutomationActive) addResources({ autoSelect: true });
       else addResources();
     }
@@ -1241,6 +1286,7 @@
 
   async function addResources({ autoSelect = false } = {}) {
     if (!state.resources.length || state.busy) return;
+    const operation = asyncOperationIdentity();
     const existingResourceButton = findResourceButton();
     const newlyMatched = existingResourceButton ? markAlreadyAttachedResources(existingResourceButton) : [];
     if (pickerIsOpen()) {
@@ -1278,34 +1324,34 @@
     const existingInputs = new Set(document.querySelectorAll('input:not([type="file"]), textarea'));
     button.click();
     const picker = await waitForDomCondition(() => {
+      if (!asyncOperationIsCurrent(operation)) return { stale: true };
       const root = resourcePickerRoot();
       if (!root) return null;
       const input = findSearchInput(root, existingInputs);
       return input ? { root, input } : null;
     });
+    if (!asyncOperationIsCurrent(operation)) return;
     if (picker) {
       const { search, result } = await searchPickerWithFallbacks(picker, resource);
-      if (result.type === 'closed') {
-        state.skipped.add(resourceId(resource));
-        state.message = `${resourceName(resource)} was skipped.`;
-        state.busy = false;
-        render();
-        return;
-      }
+      if (!asyncOperationIsCurrent(operation) || result.type === 'stale') return;
       if (result.type === 'empty') {
-        state.resourceAutomationActive = false;
         state.message = `No Civitai result was found for ${resourceName(resource)} by hash or name. Close the picker to skip it.`;
+      } else if (result.type === 'pending') {
+        state.message = `Civitai is still searching for ${resourceName(resource)}. The assistant will continue when the result appears; you can also select manually or close the picker.`;
+      } else if (result.type === 'interrupted') {
+        state.message = 'The search was changed manually. Select a resource or close the picker to continue.';
       }
       state.guidedResourceId = resourceId(resource);
       state.guidedSelectionPending = false;
-      if (result.type !== 'empty') {
+      if (result.type === 'match') {
         state.message = autoSelect
           ? `Found ${resourceName(resource)} by ${search.method}; selecting its exact version…`
           : state.autoAdvanceResources
           ? `Found by ${search.method}. Select ${resourceName(resource)}; the next search will open automatically.`
           : `Found by ${search.method}. Select ${resourceName(resource)}, then use Find next resource.`;
       }
-      watchGuidedPicker(picker.root, resource, autoSelect);
+      state.busy = false;
+      watchGuidedPicker(picker.root, resource, autoSelect && ['match', 'pending'].includes(result.type));
     } else {
       state.message = 'The resource picker did not expose its search field.';
     }

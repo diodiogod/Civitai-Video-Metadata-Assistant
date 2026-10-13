@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.24 - 2026-10-13
+
+- Wait for Civitai's resource search to finish loading before falling back from a hash to a name.
+- Treat slow searches as pending and allow late results to be selected automatically.
+- Keep automatic resource processing active after a name fallback or manual version selection, and wait for Civitai's controls before opening the next search.
+
 ## 0.6.23 - 2026-09-29
 
 - Show the assistant on step 4 of Civitai's new-model wizard, where example videos are uploaded.
