@@ -3,7 +3,7 @@
 A Firefox, Edge, and Chrome extension that reads generation metadata embedded in AI-generated MP4/WebM videos and applies it to the correct video on Civitai's upload form.
 
 > [!IMPORTANT]
-> This project is a compatibility bridge while Civitai does not natively import generation metadata from uploaded videos. Native support is being developed in [civitai/civitai#3307](https://github.com/civitai/civitai/pull/3307). When Civitai supports these tags directly, native detection should be preferred.
+> Civitai now imports ComfyUI `prompt`/`workflow` metadata natively from MP4 and WebM uploads ([civitai/civitai#5147](https://github.com/civitai/civitai/pull/5147)). With [ComfyUI Video Saver](https://github.com/diodiogod/ComfyUI-Video-Saver) v1.27.0 or newer, try the native upload with this extension disabled first. The assistant remains an optional fallback for older videos, hash-based resource recovery, or metadata Civitai misses. Broader container-tag support, including A1111 `parameters`, is tracked separately in [civitai/civitai#3307](https://github.com/civitai/civitai/pull/3307).
 
 The extension can upload videos into Civitai's existing form, fill positive and negative prompts, copy supported generation settings, resolve exact Civitai resources, and process a queue sequentially. It never publishes the post.
 
