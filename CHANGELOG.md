@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.25 - 2026-10-26
+
+- Compare each video's existing Civitai metadata and fill only missing or different prompts and settings.
+- Skip resource searches for exact versions already attached, including resources hidden behind Show All.
+- Describe the extension as an optional fallback for videos Civitai cannot fully read natively.
+
 ## 0.6.24 - 2026-10-13
 
 - Wait for Civitai's resource search to finish loading before falling back from a hash to a name.

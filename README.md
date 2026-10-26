@@ -1,19 +1,21 @@
 # Civitai Video Metadata Assistant
 
-A Firefox, Edge, and Chrome extension that reads generation metadata embedded in AI-generated MP4/WebM videos and applies it to the correct video on Civitai's upload form.
+An optional Firefox, Edge, and Chrome extension that recovers generation metadata from AI-generated MP4/WebM videos when Civitai's native import misses it.
 
 > [!IMPORTANT]
-> **This extension is no longer needed for compatible videos saved with [ComfyUI Video Saver](https://github.com/diodiogod/ComfyUI-Video-Saver) v1.27.0 or newer.** Both its native VIDEO saver and VHS metadata node support Civitai's native video-metadata import. Disable the extension and upload the saved MP4/WebM directly to Civitai first.
+> **This extension is no longer needed for compatible videos saved with [ComfyUI Video Saver](https://github.com/diodiogod/ComfyUI-Video-Saver) v1.27.0 or newer when Civitai imports their metadata correctly.** Both its native VIDEO saver and VHS metadata node support Civitai's native video-metadata import. You can upload the saved MP4/WebM directly to Civitai.
 >
 > The assistant still works as an optional fallback for older videos, hash-based resource recovery, or metadata Civitai misses. Native support reads ComfyUI `prompt`/`workflow` tags ([civitai/civitai#5147](https://github.com/civitai/civitai/pull/5147)); broader container-tag support, including A1111 `parameters`, is tracked separately in [civitai/civitai#3307](https://github.com/civitai/civitai/pull/3307).
 
-The extension can upload videos into Civitai's existing form, fill positive and negative prompts, copy supported generation settings, resolve exact Civitai resources, and process a queue sequentially. It never publishes the post.
+The extension can upload videos into Civitai's existing form, compare positive and negative prompts and supported generation settings, recover missing resources, and process a queue sequentially. Matching fields and exact resource versions are skipped. It never publishes the post.
 
 ## Features
 
 - Reads MP4 `mdta` and WebM Matroska `SimpleTag` metadata locally.
 - Supports A1111-style `parameters` and ComfyUI `prompt`, `workflow`, `extraMetadata`, and `civitaiResources` fields.
 - Fills the prompt, negative prompt, steps, sampler, seed, and guidance scale when available.
+- Checks metadata already imported by Civitai before editing; matching values are left untouched.
+- Expands the existing resource list and skips searches for exact versions already attached to the current video.
 - Binds metadata to the correct Civitai video row when several videos share one post.
 - Resolves resources by Civitai model-version ID or hash.
 - Automatically selects only exact resource/version matches; ambiguous results wait for user selection.
@@ -51,13 +53,13 @@ Download the latest ZIP from [GitHub Releases](https://github.com/diodiogod/Civi
 
 ### Try native upload first
 
-Save a new video with the updated Video Saver nodes, disable this extension, and upload through Civitai's own form. For VHS, upload the metadata-enriched `_civitai` output rather than the original Video Combine file. If Civitai imports the prompt, settings, and resources correctly, the extension is unnecessary for that video. Use the controls below when metadata is missing or an older file needs recovery.
+Save a new video with the updated Video Saver nodes and upload through Civitai's own form. For VHS, upload the metadata-enriched `_civitai` output rather than the original Video Combine file. If Civitai imports the prompt, settings, and resources correctly, the extension is unnecessary for that video. You can disable it, or leave it enabled as a fallback: automatic mode checks each video's existing metadata and acts only on missing or different supported values. It searches only for exact resource versions that are not already attached.
 
 ### Automatic queue
 
 1. Keep **Do everything automatically after I drop a video** enabled (the default).
 2. Drop one or more MP4/WebM files into the extension panel.
-3. The extension processes one video at a time: reads metadata locally, uploads the file, binds its new Civitai row, fills generation details, adds exact resource matches, and advances the queue.
+3. The extension processes one video at a time: reads metadata locally, uploads the file, binds its Civitai row, waits for its controls to finish loading, and compares the imported metadata. It fills missing or different fields, searches for missing exact resource versions, and advances the queue. Videos whose metadata already matches need no edits or resource searches.
 4. If a resource cannot be matched exactly, select the correct result manually or close the picker to skip it. Processing then continues.
 5. Review the complete Civitai post and publish it yourself.
 
@@ -121,12 +123,14 @@ When present, the assistant fills Civitai's positive prompt, negative prompt, st
 The extension has no build step. Node.js 20 or newer is used for tests and packaging.
 
 ```text
+npm ci
 npm test
 npm run check
 npm run package
 ```
 
 The release ZIP is written to `dist/`.
+The DOM test dependency is used only during development; no bundled or generated JavaScript is included in the extension.
 
 ## Contributing
 

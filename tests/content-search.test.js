@@ -110,6 +110,7 @@ function harness() {
       findResourceButton = hooks.findResourceButton;
       resourceSectionRoot = hooks.resourceSectionRoot;
       markAlreadyAttachedResources = () => [];
+      prepareAttachedResources = async () => true;
     }
   };`;
   const normalized = source.replace(/\r\n/g, '\n');

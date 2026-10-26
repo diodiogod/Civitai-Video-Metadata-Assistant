@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Civitai Video Metadata Assistant",
-  "version": "0.6.24",
-  "description": "Read generation metadata from local MP4/WebM files and fill Civitai upload prompts and resources.",
+  "version": "0.6.25",
+  "description": "Optional fallback for Civitai video metadata. Recover missing prompts, settings and resources from local MP4/WebM files.",
   "action": {
     "default_title": "Scan Civitai video metadata",
     "default_popup": "popup.html",

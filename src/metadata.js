@@ -672,14 +672,44 @@
     const versionIds = new Set((attached.versionIds || []).map(asId).filter(Boolean));
     const modelIds = new Set((attached.modelIds || []).map(asId).filter(Boolean));
     if (versionId && versionIds.has(versionId)) return { matched: true, method: 'version ID' };
-    if (modelId && modelIds.has(modelId)) return { matched: true, method: 'model ID' };
+    // A model-level match is insufficient when the file identifies a version.
+    // In particular, another version of the same LoRA must not be skipped.
+    if (!versionId && modelId && modelIds.has(modelId)) return { matched: true, method: 'model ID' };
+    const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const name = normalize(resource?.lookup?.model?.name || resource?.modelName || resource?.name);
+    const versionName = normalize(resource?.lookup?.name || resource?.modelVersionName || resource?.versionName);
+    const visibleMatch = (attached.resources || []).some((item) => {
+      if (item.modelVersionId || (modelId && item.modelId && asId(item.modelId) !== modelId)) return false;
+      return name && name === normalize(item.modelName)
+        && (!versionId || (versionName && versionName === normalize(item.modelVersionName)));
+    });
+    return visibleMatch ? { matched: true, method: 'visible model and version' } : { matched: false, method: '' };
+  }
 
-    const sectionText = String(attached.text || '').replace(/\s+/g, ' ').trim().toLowerCase();
-    const names = [resource?.lookup?.model?.name, resource?.modelName, resource?.name]
-      .filter((name) => typeof name === 'string' && name.trim().length >= 3)
-      .map((name) => name.replace(/\s+/g, ' ').trim().toLowerCase());
-    const name = names.find((candidate) => sectionText.includes(candidate));
-    return name ? { matched: true, method: 'visible model name' } : { matched: false, method: '' };
+  function metadataValuesEqual(name, current, expected, generation = {}) {
+    const text = (value) => String(value ?? '').replace(/\r\n?/g, '\n').trim();
+    if (name === 'positive' || name === 'negative') return text(current) === text(expected);
+    const left = text(current);
+    const right = text(expected);
+    if (!left || !right) return left === right;
+    if (name === 'seed') {
+      const integer = (value) => value.replace(/,/g, '');
+      if (/^-?\d+$/.test(integer(left)) && /^-?\d+$/.test(integer(right))) {
+        return BigInt(integer(left)) === BigInt(integer(right));
+      }
+    }
+    if (name === 'steps' || name === 'guidanceScale') {
+      return Number.isFinite(Number(left)) && Number(left) === Number(right);
+    }
+    const canonical = (value) => value.toLowerCase().replace(/dpmpp/g, 'dpm++')
+      .replace(/euler[_ ]ancestral/g, 'euler a').replace(/[\s_\-]/g, '');
+    if (name === 'sampler') {
+      const sampler = canonical(right);
+      // Civitai can display the scheduler as part of the sampler name.
+      const scheduler = canonical(text(generation.scheduler));
+      return canonical(left) === sampler || Boolean(scheduler && canonical(left) === sampler + scheduler);
+    }
+    return canonical(left) === canonical(right);
   }
 
   return {
@@ -698,6 +728,7 @@
     directDropMediaIndexes,
     uploadRouteKey,
     resourceIsAlreadyAttached,
+    metadataValuesEqual,
     detectContainer,
     constants: { MAX_FILE_BYTES, MAX_METADATA_BYTES, MAX_VALUE_BYTES, MAX_ELEMENTS }
   };

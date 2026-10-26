@@ -231,20 +231,43 @@ test('recognizes an exact resource version already attached by Civitai', () => {
   assert.deepEqual(match, { matched: true, method: 'version ID' });
 });
 
-test('skips another version when the same model is already attached', () => {
+test('does not skip a different version of the same attached model', () => {
   const match = metadata.resourceIsAlreadyAttached(
     { lookup: { id: 999, modelId: 123, model: { name: 'Example LoRA' } } },
     { versionIds: ['456'], modelIds: ['123'], text: 'Resources' }
   );
-  assert.deepEqual(match, { matched: true, method: 'model ID' });
+  assert.deepEqual(match, { matched: false, method: '' });
 });
 
-test('uses the visible model name when Civitai does not expose resource IDs', () => {
+test('requires the model and exact version name when Civitai does not expose resource IDs', () => {
   const match = metadata.resourceIsAlreadyAttached(
-    { lookup: { id: 999, modelId: 123, model: { name: 'Example LoRA' } } },
-    { versionIds: [], modelIds: [], text: 'Resources Example LoRA v2 LORA' }
+    { lookup: { id: 999, modelId: 123, name: 'v2', model: { name: 'Example LoRA' } } },
+    { resources: [{ modelName: 'Example LoRA', modelVersionName: 'v2' }] }
   );
-  assert.deepEqual(match, { matched: true, method: 'visible model name' });
+  assert.deepEqual(match, { matched: true, method: 'visible model and version' });
+});
+
+test('unmatched-resource warnings and prompt text are not attachment evidence', () => {
+  assert.equal(metadata.resourceIsAlreadyAttached(
+    { lookup: { id: 999, modelId: 123, model: { name: 'Example LoRA' } } },
+    { text: 'Resources Could not match Example LoRA v2' }
+  ).matched, false);
+});
+
+test('metadata comparison preserves exact seed precision and prompt whitespace', () => {
+  assert.equal(metadata.metadataValuesEqual('seed', '18,446,744,073,709,551,614', '18446744073709551614'), true);
+  assert.equal(metadata.metadataValuesEqual('seed', '18446744073709551614', '18446744073709551615'), false);
+  assert.equal(metadata.metadataValuesEqual('guidanceScale', '4.0', 4), true);
+  assert.equal(metadata.metadataValuesEqual('steps', '20', 21), false);
+  assert.equal(metadata.metadataValuesEqual('positive', 'one  two\r\nthree', 'one  two\nthree'), true);
+  assert.equal(metadata.metadataValuesEqual('positive', 'one  two', 'one two'), false);
+});
+
+test('recognizes native sampler names with a scheduler suffix', () => {
+  assert.equal(metadata.metadataValuesEqual('sampler', 'DPM++ 2M Karras', 'dpmpp_2m', { scheduler: 'karras' }), true);
+  assert.equal(metadata.metadataValuesEqual('sampler', 'Euler a', 'euler_ancestral'), true);
+  assert.equal(metadata.metadataValuesEqual('sampler', 'Euler a', 'euler'), false);
+  assert.equal(metadata.metadataValuesEqual('sampler', 'DPM++ 2M Karras', 'dpmpp_2m', { scheduler: 'exponential' }), false);
 });
 
 test('does not confuse a different attached model with the target resource', () => {

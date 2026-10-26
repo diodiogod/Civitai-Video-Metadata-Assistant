@@ -567,6 +567,7 @@
 
     const nodes = [
       header,
+      element('div', 'cvm-native-notice', 'Optional fallback: Civitai reads compatible videos natively. This assistant checks each video and fills only missing or different metadata.'),
       element('div', 'cvm-message', state.message),
       masterMode,
       stepRow(1, 'Choose the video', 'Drop it below. Metadata stays local until you send the file to Civitai.'),
@@ -808,10 +809,13 @@
     const candidates = globalThis.CVMMetadata.ancestorPathWithinBoundary(button?.parentElement, boundary);
     let headingContainer = null;
     for (const candidate of candidates) {
-      const hasResourcesHeading = [...candidate.querySelectorAll('h1, h2, h3, h4, h5, h6, legend')]
-        .some((heading) => /^resources$/i.test(normalizeText(heading.textContent)));
+      const headings = [...candidate.querySelectorAll('h1, h2, h3, h4, h5, h6, legend')];
+      const hasResourcesHeading = headings.some((heading) => /^resources$/i.test(normalizeText(heading.textContent)));
       if (!hasResourcesHeading) continue;
-      if (!headingContainer) headingContainer = candidate;
+      // Never broaden a resource snapshot into the whole video/post: unmatched
+      // warnings, prompts and other media are not attached-resource evidence.
+      if (headings.some((heading) => /^(prompt|negative prompt|tools|techniques|thumbnail)$/i.test(normalizeText(heading.textContent)))) break;
+      headingContainer = candidate;
       const hasAttachedCards = candidate.querySelector(
         'a[href*="/models/"], a[href*="/model-versions/"], [data-model-id], [data-model-version-id], [data-version-id]'
       );
@@ -820,15 +824,48 @@
     return headingContainer;
   }
 
+  async function prepareAttachedResources(operation = asyncOperationIdentity()) {
+    const ready = await waitForDomCondition(() => {
+      if (!asyncOperationIsCurrent(operation)) return { stale: true };
+      const root = currentTargetRoot();
+      const button = findResourceButton(root);
+      if (!button || pickerIsLoading(root)) return null;
+      const section = resourceSectionRoot(button);
+      return section ? { section } : null;
+    }, 120000);
+    if (!ready?.section || !asyncOperationIsCurrent(operation)) return false;
+    const showAll = visibleElements('button, [role="button"]', ready.section)
+      .find((button) => /^show all\s*\(\d+\)$/i.test(normalizeText(button.textContent)));
+    if (showAll) {
+      showAll.click();
+      const expanded = await waitForDomCondition(() => {
+        if (!asyncOperationIsCurrent(operation)) return { stale: true };
+        const section = resourceSectionRoot(findResourceButton());
+        if (!section || pickerIsLoading(section)) return null;
+        return !visibleElements('button, [role="button"]', section)
+          .some((button) => /^show all\s*\(\d+\)$/i.test(normalizeText(button.textContent))) ? { ready: true } : null;
+      });
+      if (!expanded?.ready) return false;
+    }
+    return asyncOperationIsCurrent(operation);
+  }
+
   function attachedResourceSnapshot(button) {
     const root = resourceSectionRoot(button);
     if (!root) return { modelIds: [], versionIds: [], text: '' };
     const modelIds = new Set();
     const versionIds = new Set();
+    const resources = [];
     for (const element of root.querySelectorAll('a[href], [data-model-id], [data-model-version-id], [data-version-id]')) {
       if (element.closest(`#${EXTENSION_ID}`)) continue;
       const modelData = element.getAttribute('data-model-id');
       const versionData = element.getAttribute('data-model-version-id') || element.getAttribute('data-version-id');
+      resources.push({
+        modelId: modelData,
+        modelVersionId: versionData,
+        modelName: element.getAttribute('data-model-name'),
+        modelVersionName: element.getAttribute('data-model-version-name')
+      });
       if (/^\d+$/.test(modelData || '')) modelIds.add(modelData);
       if (/^\d+$/.test(versionData || '')) versionIds.add(versionData);
       const href = element.getAttribute('href');
@@ -848,6 +885,7 @@
     return {
       modelIds: [...modelIds],
       versionIds: [...versionIds],
+      resources,
       text: normalizeText(root.textContent)
     };
   }
@@ -860,7 +898,7 @@
     const matched = [];
     for (const resource of state.resources) {
       const id = resourceId(resource);
-      if (!resource.lookup || state.added.has(id) || state.skipped.has(id)) continue;
+      if (state.added.has(id) || state.skipped.has(id)) continue;
       const match = globalThis.CVMMetadata.resourceIsAlreadyAttached(resource, attached);
       if (!match.matched) continue;
       state.added.add(id);
@@ -1275,7 +1313,7 @@
       && !state.skipped.has(resourceId(resource)));
     if (remaining) return false;
     state.resourceAutomationActive = false;
-    const unresolved = state.resources.filter((resource) => !resource.lookup).length;
+    const unresolved = state.resources.filter((resource) => !resource.lookup && !state.added.has(resourceId(resource))).length;
     state.message = unresolved
       ? `All resolved resources are complete. ${unresolved} unresolved resource${unresolved === 1 ? ' was' : 's were'} skipped.`
       : 'All detected resources are complete.';
@@ -1287,6 +1325,17 @@
   async function addResources({ autoSelect = false } = {}) {
     if (!state.resources.length || state.busy) return;
     const operation = asyncOperationIdentity();
+    if (!pickerIsOpen()) {
+      state.busy = true;
+      const ready = await prepareAttachedResources(operation);
+      if (!asyncOperationIsCurrent(operation)) return;
+      state.busy = false;
+      if (!ready) {
+        state.message = 'Civitai is still preparing this video’s metadata. Try Find next resource when its controls finish loading.';
+        render();
+        return;
+      }
+    }
     const existingResourceButton = findResourceButton();
     const newlyMatched = existingResourceButton ? markAlreadyAttachedResources(existingResourceButton) : [];
     if (pickerIsOpen()) {
@@ -1489,6 +1538,7 @@
     guidanceScale: '[name="cfgScale"], #input_cfgScale',
     steps: '[name="steps"], #input_steps',
     sampler: '#input_sampler, [name="sampler"]:not([type="hidden"])',
+    scheduler: '[name="scheduler"], #input_scheduler, [name="scheduleType"], #input_scheduleType',
     seed: '[name="seed"], #input_seed'
   };
 
@@ -1500,10 +1550,48 @@
       .find((element) => label.test(elementLabel(element).toLowerCase())) || null;
   }
 
+  function promptMatchesPage(prompt, generation) {
+    const root = currentTargetRoot();
+    const headings = [...root.querySelectorAll('h1, h2, h3, h4, h5, h6')];
+    const heading = headings.find((item) => /^prompt$/i.test(normalizeText(item.textContent)));
+    if (!heading) return false;
+    const header = heading.parentElement;
+    const positive = header?.nextElementSibling;
+    if (!positive || !globalThis.CVMMetadata.metadataValuesEqual('positive', positive.textContent, prompt.positive)) return false;
+    const negative = headings.find((item) => /^negative prompt$/i.test(normalizeText(item.textContent)))?.nextElementSibling;
+    if (prompt.negative && (!negative || !globalThis.CVMMetadata.metadataValuesEqual('negative', negative.textContent, prompt.negative))) return false;
+    const labels = { guidanceScale: 'Guidance', steps: 'Steps', sampler: 'Sampler', seed: 'Seed' };
+    for (const [name, label] of Object.entries(labels)) {
+      const value = generation[name];
+      if (value === null || value === undefined || value === '') continue;
+      const labelElement = [...root.querySelectorAll('p, span, dt, div')]
+        .find((item) => item.children.length === 0 && normalizeText(item.textContent) === label);
+      const displayed = labelElement?.nextElementSibling;
+      if (!displayed || !globalThis.CVMMetadata.metadataValuesEqual(name, displayed.textContent, value, generation)) return false;
+    }
+    const schedulerLabel = [...root.querySelectorAll('p, span, dt, div')]
+      .find((item) => item.children.length === 0 && /^(scheduler|schedule type)$/i.test(normalizeText(item.textContent)));
+    if (generation.scheduler && schedulerLabel && (!schedulerLabel.nextElementSibling
+      || !globalThis.CVMMetadata.metadataValuesEqual('scheduler', schedulerLabel.nextElementSibling.textContent, generation.scheduler))) return false;
+    // Civitai's current editor exposes no separate scheduler field. Its native
+    // sampler may already include that value (e.g. DPM++ 2M Karras).
+    return true;
+  }
+
+  function closeUnchangedPromptEditor(root) {
+    const close = visibleElements('button, [role="button"]', root).find((button) =>
+      /^(cancel|close)$/i.test(normalizeText(button.getAttribute('aria-label') || button.textContent))
+      || /mantine-CloseButton-root/.test(String(button.className)));
+    if (close) close.click();
+    return Boolean(close);
+  }
+
   async function selectPromptSampler(root, value) {
     if (value === null || value === undefined || value === '') return false;
     const field = promptField(root, 'sampler', /^sampler$/i);
     if (!field) return false;
+    const generation = globalThis.CVMMetadata.getGenerationFields(state.parsed?.metadata || {});
+    if (globalThis.CVMMetadata.metadataValuesEqual('sampler', fieldText(field), value, generation)) return false;
     field.click();
     dispatchInput(field, String(value));
     const wanted = normalizeText(value).toLowerCase();
@@ -1518,6 +1606,7 @@
     if (value === null || value === undefined || value === '') return false;
     const field = promptField(root, 'seed', /^seed$/i);
     if (!(field instanceof HTMLInputElement)) return false;
+    if (globalThis.CVMMetadata.metadataValuesEqual('seed', fieldText(field), value)) return false;
     const text = String(value);
     field.focus();
     field.select();
@@ -1546,23 +1635,33 @@
   }
 
   async function fillCivitaiPrompt() {
-    if (state.busy) return;
+    if (state.busy) return false;
+    const operation = asyncOperationIdentity();
     if (!hasPromptTarget()) {
       state.message = 'Multiple videos are present and this file is not bound to a Civitai row. Use this file in Civitai upload first.';
       render();
-      return;
+      return false;
     }
     const prompt = globalThis.CVMMetadata.getPromptFields(state.parsed?.metadata || {});
+    const generation = globalThis.CVMMetadata.getGenerationFields(state.parsed?.metadata || {});
     if (!prompt.positive) {
+      state.promptFilled = true;
       state.message = 'No positive prompt was found in the video metadata.';
       render();
-      return;
+      return true;
+    }
+    if (promptMatchesPage(prompt, generation)) {
+      state.promptFilled = true;
+      state.message = 'Civitai already has this video’s prompt and supported settings. No edits needed.';
+      addActivity('success', state.message);
+      render();
+      return true;
     }
     const button = findEditPromptButton();
     if (!button) {
       state.message = 'Civitai’s Edit prompt button was not found. Open the uploaded video’s prompt section, then try again.';
       render();
-      return;
+      return false;
     }
     state.busy = true;
     state.message = 'Opening Civitai’s prompt editor…';
@@ -1576,11 +1675,12 @@
       if (candidate && (root !== document || !existingEditors.has(candidate))) return candidate;
       return promptEditors(root).find((freshEditor) => !existingEditors.has(freshEditor)) || null;
     });
+    if (!asyncOperationIsCurrent(operation)) return false;
     if (!editor) {
       state.busy = false;
       state.message = 'Civitai opened no recognizable prompt editor. Use Copy prompt and paste it into Edit prompt.';
       render();
-      return;
+      return false;
     }
     let root = promptEditorRoot(editor) || getDialogRoot();
     // Civitai mounts the positive prompt first, then adds the other Mantine
@@ -1591,20 +1691,25 @@
         .filter((name) => promptField(candidate, name, new RegExp(`^${name}$`, 'i'))).length;
       return ready >= 4 ? candidate : null;
     }, 8000);
+    if (!asyncOperationIsCurrent(operation)) return false;
     if (completeRoot) root = completeRoot;
-    dispatchInput(editor, prompt.positive);
+    const filledFields = [];
+    if (!globalThis.CVMMetadata.metadataValuesEqual('positive', editor.isContentEditable ? editor.textContent : editor.value, prompt.positive)) {
+      dispatchInput(editor, prompt.positive);
+      filledFields.push('positive prompt');
+    }
     const negativeEditor = promptField(root, 'negative', /^negative prompt$/i)
       || findPromptEditor(root || document, true);
-    const filledFields = ['positive prompt'];
-    if (negativeEditor && negativeEditor !== editor && prompt.negative) {
+    if (negativeEditor && negativeEditor !== editor && prompt.negative
+      && !globalThis.CVMMetadata.metadataValuesEqual('negative', negativeEditor.isContentEditable ? negativeEditor.textContent : negativeEditor.value, prompt.negative)) {
       dispatchInput(negativeEditor, prompt.negative);
       filledFields.push('negative prompt');
     }
-    const generation = globalThis.CVMMetadata.getGenerationFields(state.parsed?.metadata || {});
     const fillLabeledField = (name, key, label, value) => {
       if (value === null || value === undefined || value === '') return false;
       const field = promptField(root || document, key, label);
       if (!field || field === editor || field === negativeEditor) return false;
+      if (globalThis.CVMMetadata.metadataValuesEqual(key, fieldText(field), value, generation)) return false;
       dispatchInput(field, String(value));
       filledFields.push(name);
       return true;
@@ -1612,21 +1717,36 @@
     fillLabeledField('guidance scale', 'guidanceScale', /^guidance scale$/i, generation.guidanceScale);
     fillLabeledField('steps', 'steps', /^steps$/i, generation.steps);
     if (await selectPromptSampler(root, generation.sampler)) filledFields.push('sampler');
+    if (!asyncOperationIsCurrent(operation)) return false;
     fillLabeledField('scheduler', 'scheduler', /^(scheduler|schedule type)$/i, generation.scheduler);
     if (await fillPromptSeed(root, generation.seed)) filledFields.push('seed');
+    if (!asyncOperationIsCurrent(operation)) return false;
+    if (!filledFields.length) {
+      const closed = closeUnchangedPromptEditor(root);
+      state.promptFilled = closed;
+      state.busy = false;
+      state.message = closed ? 'Civitai already has the supported prompt metadata. No edits needed.'
+        : 'Civitai already has the supported prompt metadata. Close the unchanged editor to continue.';
+      render();
+      return closed;
+    }
     const saveButton = await waitForDomCondition(() => findPromptSaveButton(root), 3000);
+    if (!asyncOperationIsCurrent(operation)) return false;
+    let saved = false;
     if (saveButton) {
       saveButton.click();
-      await waitForDomCondition(() => !visible(editor) || !visible(saveButton), 8000);
-      state.message = `Filled ${filledFields.join(', ')}. Review the values before submitting.`;
-      addActivity('success', `Filled ${filledFields.join(', ')}.`);
+      saved = Boolean(await waitForDomCondition(() => !visible(editor) || !visible(saveButton), 8000));
+      if (!asyncOperationIsCurrent(operation)) return false;
+      state.message = saved ? `Filled ${filledFields.join(', ')}. Review the values before submitting.`
+        : 'Civitai has not closed the prompt editor. Finish saving it before continuing.';
+      if (saved) addActivity('success', `Filled ${filledFields.join(', ')}.`);
     } else {
       state.message = 'The prompt was inserted. Civitai’s confirmation button was not recognized, so review the editor and save it manually.';
     }
-    state.promptFilled = true;
+    state.promptFilled = saved;
     state.busy = false;
     render();
-    if (!state.resources.some((resource) => resource.lookup)) completeActiveQueueItem('Prompt filled; no resolved resources required.');
+    return saved;
   }
 
   async function copyPrompt() {
@@ -1722,9 +1842,21 @@
       await useFileInCivitaiUpload();
     }
     if (scanToken !== state.scanToken || state.targetMediaFileKey !== state.fileKey) return;
-    await fillCivitaiPrompt();
+    state.busy = true;
+    state.message = 'Waiting for Civitai’s video metadata, then checking what is missing…';
+    render();
+    const ready = await prepareAttachedResources();
     if (scanToken !== state.scanToken || state.activeQueueId !== queueId) return;
-    if (!state.resources.some((resource) => resource.lookup)) return;
+    state.busy = false;
+    if (!ready) {
+      state.message = 'Civitai is still preparing this video’s metadata. Try Find next resource when its controls finish loading.';
+      render();
+      return;
+    }
+    markAlreadyAttachedResources(findResourceButton());
+    if (!await fillCivitaiPrompt()) return;
+    if (scanToken !== state.scanToken || state.activeQueueId !== queueId) return;
+    if (finishResourcePassIfComplete()) return;
     state.resourceAutomationActive = true;
     await addResources({ autoSelect: true });
   }
