@@ -3,7 +3,9 @@
 A Firefox, Edge, and Chrome extension that reads generation metadata embedded in AI-generated MP4/WebM videos and applies it to the correct video on Civitai's upload form.
 
 > [!IMPORTANT]
-> Civitai now imports ComfyUI `prompt`/`workflow` metadata natively from MP4 and WebM uploads ([civitai/civitai#5147](https://github.com/civitai/civitai/pull/5147)). With [ComfyUI Video Saver](https://github.com/diodiogod/ComfyUI-Video-Saver) v1.27.0 or newer, try the native upload with this extension disabled first. The assistant remains an optional fallback for older videos, hash-based resource recovery, or metadata Civitai misses. Broader container-tag support, including A1111 `parameters`, is tracked separately in [civitai/civitai#3307](https://github.com/civitai/civitai/pull/3307).
+> **This extension is no longer needed for compatible videos saved with [ComfyUI Video Saver](https://github.com/diodiogod/ComfyUI-Video-Saver) v1.27.0 or newer.** Both its native VIDEO saver and VHS metadata node support Civitai's native video-metadata import. Disable the extension and upload the saved MP4/WebM directly to Civitai first.
+>
+> The assistant still works as an optional fallback for older videos, hash-based resource recovery, or metadata Civitai misses. Native support reads ComfyUI `prompt`/`workflow` tags ([civitai/civitai#5147](https://github.com/civitai/civitai/pull/5147)); broader container-tag support, including A1111 `parameters`, is tracked separately in [civitai/civitai#3307](https://github.com/civitai/civitai/pull/3307).
 
 The extension can upload videos into Civitai's existing form, fill positive and negative prompts, copy supported generation settings, resolve exact Civitai resources, and process a queue sequentially. It never publishes the post.
 
@@ -46,6 +48,10 @@ Download the latest ZIP from [GitHub Releases](https://github.com/diodiogod/Civi
 5. Open or reload Civitai's Create Image/Create Video page.
 
 ## Usage
+
+### Try native upload first
+
+Save a new video with the updated Video Saver nodes, disable this extension, and upload through Civitai's own form. For VHS, upload the metadata-enriched `_civitai` output rather than the original Video Combine file. If Civitai imports the prompt, settings, and resources correctly, the extension is unnecessary for that video. Use the controls below when metadata is missing or an older file needs recovery.
 
 ### Automatic queue
 
